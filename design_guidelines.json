@@ -1,0 +1,119 @@
+{
+  "project_name": "AuditEngine",
+  "design_directive": "The Mirror of Certainty",
+  "theme": "dark",
+  "archetype": "Swiss Brutalism / Terminal UI Variant",
+  "design_principles": [
+    "Clinical precision instrument, not a software product",
+    "Zero decoration, absolute authority",
+    "High stakes auditor terminal feel",
+    "Data density with pristine structural clarity"
+  ],
+  "colors": {
+    "background": "#000000",
+    "surface_1": "#050505",
+    "surface_2": "#0D0D0D",
+    "borders": {
+      "default": "#1A1A1A",
+      "strong": "#2A2A2A"
+    },
+    "semantic": {
+      "critical_alert": "#FF0000",
+      "moderate_warning": "#FFBF00",
+      "compliant_success": "#00FF41"
+    },
+    "text": {
+      "primary": "#E8E8E8",
+      "secondary": "#808080"
+    }
+  },
+  "typography": {
+    "primary": {
+      "family": "Roboto Mono",
+      "usage": "All system labels, navigation, KPI values, metadata, timers, score values, table headers."
+    },
+    "secondary": {
+      "family": "Inter",
+      "usage": "Finding titles, body descriptions, long-form text blocks."
+    }
+  },
+  "styling_rules": {
+    "borders": "border-[0.5px] border-[#1A1A1A] for standard structural borders. border-[0.5px] border-[#2A2A2A] for strong dividers.",
+    "border_radius": "rounded-none (0px) globally. No exceptions.",
+    "shadows": "shadow-none. Rely entirely on background contrast and 0.5px borders for depth.",
+    "contrast": "Extremely high contrast. Pure black and strict monochrome layers.",
+    "hover_states": "Hover states should utilize Surface 2 (#0D0D0D) or solid pure white (#FFF) text inversions, keeping the sharp, technical aesthetic."
+  },
+  "assets_and_media": {
+    "icons": "Use Phosphor Icons (e.g. @phosphor-icons/react). Technical, sharp, minimal.",
+    "images": "Zero decoration. DO NOT generate or place any placeholder images, photos, or illustrations. The interface must remain entirely text, shapes, and data.",
+    "image_urls": []
+  },
+  "ui_flow_and_modules": {
+    "google_auth": {
+      "type": "login_screen",
+      "description": "Dark, severe minimalist login screen. 'Authenticate via Google' button with 0.5px border and no shadow. Terminal-like prompt feel."
+    },
+    "workspace_dashboard": {
+      "type": "dashboard",
+      "description": "Dark, minimal dashboard acting as the command center. Contains the 'New Audit' trigger."
+    },
+    "new_audit_drawer": {
+      "type": "drawer",
+      "description": "Triggered by 'New Audit'. Contains Client Name, NACE Rev. 2 code (Searchable Dropdown), and Reporting Year.",
+      "components_needed": ["Shadcn Drawer (remove rounded corners)", "Shadcn Command/Combobox (for NACE code search)", "Input fields"]
+    },
+    "intake_zone": {
+      "type": "drag_and_drop",
+      "description": "The Black Box Intake. Drag-and-drop upload zone for PDF, XLSX, and TXT.",
+      "interaction": "On drop, the zone MUST collapse into a 32px height status bar reading 'RECEIVING INPUT...' in Roboto Mono."
+    },
+    "processing_state": {
+      "type": "status_panel",
+      "description": "Full-width panel that slides up with 5 sequential step indicators.",
+      "steps": ["File Extraction", "Payload Writing", "Logic Engine Running", "Risk Map Generation", "PDF Delivery"],
+      "indicators": "Transitions: Empty square (#333) -> Pulsing (#fff) -> Solid (#00FF41)",
+      "extras": "Live UTC timer (MM:SS) fixed in the top-right corner."
+    },
+    "the_reveal": {
+      "type": "animation_sequence",
+      "description": "Post-processing dashboard reveal with a 300ms opacity transition.",
+      "score_animation": "Main Compliance Score (0-100) must be a ring that animates from 0 to the final value over 800ms."
+    },
+    "ceo_kpi_strip": {
+      "type": "data_summary",
+      "layout": "Top-of-page summary strip.",
+      "metrics": [
+        "Compliance Score (Color-coded: Red <60, Amber 60-79, Green 80+)",
+        "Total Value at Stake (€)",
+        "Critical Findings Count",
+        "Greenwashing Risk Level (HIGH / MODERATE / LOW / NONE)"
+      ]
+    },
+    "interactive_findings_table": {
+      "type": "data_table",
+      "layout": "Clinical table sorted by severity, rows must be expandable.",
+      "columns": ["Severity Tag (Outlined)", "Data Point", "Status (COMPLIANT/NON_COMPLIANT/MISSING)", "Regulatory Ref", "Finding Detail"],
+      "visuals": "Severity tags must be 0.5px outlined tags matching semantic colors (Red, Amber, Green). Use MISSING/UNVERIFIED visual tags."
+    },
+    "strategic_value_roadmap": {
+      "type": "action_panel",
+      "description": "Panel listing the Top 5 opportunities.",
+      "format": "'Action -> Metric Impact -> € Saving'. Must include implementation cost and payback months."
+    },
+    "re_score_simulator": {
+      "type": "interactive_panel",
+      "description": "Interactive panel where users mark findings as 'Resolved' to see their projected compliance score update in real-time."
+    },
+    "pdf_export": {
+      "type": "action",
+      "description": "PDF Delivery / Download action. Keep it as a sharp, text-focused command button."
+    }
+  },
+  "technical_instructions": {
+    "framework": "React (.js files, NOT .tsx), Tailwind CSS",
+    "components": "Use pure HTML + Tailwind for macro layouts. Use Shadcn for complex logic (Tables, Drawers, Dropdowns, Select), heavily customizing them to strip out ALL border-radius and shadows.",
+    "testing_attributes": "CRITICAL: All interactive and key informational elements MUST include a `data-testid` attribute (e.g., data-testid='new-audit-button', data-testid='compliance-score'). Use kebab-case and role-based naming.",
+    "grids": "Rely strictly on CSS grids with 0.5px borders acting as strict dividing lines between cells and zones. No floating cards."
+  }
+}
