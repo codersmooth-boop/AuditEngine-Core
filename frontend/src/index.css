@@ -1,115 +1,113 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Roboto+Mono:wght@300;400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-body {
-    margin: 0;
-    font-family:
-        -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen",
-        "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue",
-        sans-serif;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+:root {
+  --ae-bg: #000000;
+  --ae-s1: #050505;
+  --ae-s2: #0D0D0D;
+  --ae-border: #1A1A1A;
+  --ae-border-strong: #2A2A2A;
+  --ae-critical: #FF0000;
+  --ae-warning: #FFBF00;
+  --ae-success: #00FF41;
+  --ae-text: #E8E8E8;
+  --ae-text-2: #808080;
+  --font-mono: 'Roboto Mono', ui-monospace, monospace;
+  --font-sans: 'Inter', system-ui, sans-serif;
 }
 
-code {
-    font-family:
-        source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
+html, body, #root {
+  background: var(--ae-bg);
+  color: var(--ae-text);
+  min-height: 100vh;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  margin: 0;
 }
 
+::selection { background: var(--ae-success); color: #000; }
+
+/* Shadcn tokens - dark by default, sharp corners */
 @layer base {
-    :root {
-        --background: 0 0% 100%;
-        --foreground: 0 0% 3.9%;
-        --card: 0 0% 100%;
-        --card-foreground: 0 0% 3.9%;
-        --popover: 0 0% 100%;
-        --popover-foreground: 0 0% 3.9%;
-        --primary: 0 0% 9%;
-        --primary-foreground: 0 0% 98%;
-        --secondary: 0 0% 96.1%;
-        --secondary-foreground: 0 0% 9%;
-        --muted: 0 0% 96.1%;
-        --muted-foreground: 0 0% 45.1%;
-        --accent: 0 0% 96.1%;
-        --accent-foreground: 0 0% 9%;
-        --destructive: 0 84.2% 60.2%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 89.8%;
-        --input: 0 0% 89.8%;
-        --ring: 0 0% 3.9%;
-        --chart-1: 12 76% 61%;
-        --chart-2: 173 58% 39%;
-        --chart-3: 197 37% 24%;
-        --chart-4: 43 74% 66%;
-        --chart-5: 27 87% 67%;
-        --radius: 0.5rem;
-    }
-    .dark {
-        --background: 0 0% 3.9%;
-        --foreground: 0 0% 98%;
-        --card: 0 0% 3.9%;
-        --card-foreground: 0 0% 98%;
-        --popover: 0 0% 3.9%;
-        --popover-foreground: 0 0% 98%;
-        --primary: 0 0% 98%;
-        --primary-foreground: 0 0% 9%;
-        --secondary: 0 0% 14.9%;
-        --secondary-foreground: 0 0% 98%;
-        --muted: 0 0% 14.9%;
-        --muted-foreground: 0 0% 63.9%;
-        --accent: 0 0% 14.9%;
-        --accent-foreground: 0 0% 98%;
-        --destructive: 0 62.8% 30.6%;
-        --destructive-foreground: 0 0% 98%;
-        --border: 0 0% 14.9%;
-        --input: 0 0% 14.9%;
-        --ring: 0 0% 83.1%;
-        --chart-1: 220 70% 50%;
-        --chart-2: 160 60% 45%;
-        --chart-3: 30 80% 55%;
-        --chart-4: 280 65% 60%;
-        --chart-5: 340 75% 55%;
-    }
+  :root {
+    --background: 0 0% 0%;
+    --foreground: 0 0% 91%;
+    --card: 0 0% 3%;
+    --card-foreground: 0 0% 91%;
+    --popover: 0 0% 3%;
+    --popover-foreground: 0 0% 91%;
+    --primary: 0 0% 91%;
+    --primary-foreground: 0 0% 0%;
+    --secondary: 0 0% 5%;
+    --secondary-foreground: 0 0% 91%;
+    --muted: 0 0% 5%;
+    --muted-foreground: 0 0% 50%;
+    --accent: 0 0% 8%;
+    --accent-foreground: 0 0% 91%;
+    --destructive: 0 100% 50%;
+    --destructive-foreground: 0 0% 91%;
+    --border: 0 0% 16%;
+    --input: 0 0% 10%;
+    --ring: 0 0% 91%;
+    --radius: 0px;
+  }
+  * { border-color: hsl(var(--border)); }
+  body { @apply bg-background text-foreground; }
 }
 
-@layer base {
-    * {
-        @apply border-border;
-    }
-    body {
-        @apply bg-background text-foreground;
-    }
+/* Kill rounded corners across shadcn */
+* { border-radius: 0 !important; box-shadow: none !important; }
+
+.mono { font-family: var(--font-mono); font-feature-settings: "tnum"; letter-spacing: 0.02em; }
+.sans { font-family: var(--font-sans); }
+
+.divider-x { border-top: 0.5px solid var(--ae-border); }
+.divider-s { border-top: 0.5px solid var(--ae-border-strong); }
+.ae-border { border: 0.5px solid var(--ae-border); }
+.ae-border-strong { border: 0.5px solid var(--ae-border-strong); }
+
+.ae-bar-scan { background: linear-gradient(90deg, transparent, var(--ae-success), transparent); }
+
+@keyframes ae-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+.ae-pulse { animation: ae-pulse 1.1s ease-in-out infinite; }
+
+@keyframes ae-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.ae-fade-in { animation: ae-fade-in 300ms ease-out both; }
+
+@keyframes ae-slide-up {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.ae-slide-up { animation: ae-slide-up 260ms ease-out both; }
+
+@keyframes ae-cursor {
+  0%, 60% { opacity: 1; }
+  61%, 100% { opacity: 0; }
+}
+.ae-cursor::after { content: "▮"; margin-left: 4px; color: var(--ae-success); animation: ae-cursor 1s steps(1) infinite; }
+
+.ae-grid-noise::before {
+  content: "";
+  position: absolute; inset: 0; pointer-events: none;
+  background-image:
+    linear-gradient(var(--ae-border) 0.5px, transparent 0.5px),
+    linear-gradient(90deg, var(--ae-border) 0.5px, transparent 0.5px);
+  background-size: 32px 32px;
+  opacity: 0.35;
 }
 
-@layer base {
-    [data-debug-wrapper="true"] {
-        display: contents !important;
-    }
-
-    [data-debug-wrapper="true"] > * {
-        margin-left: inherit;
-        margin-right: inherit;
-        margin-top: inherit;
-        margin-bottom: inherit;
-        padding-left: inherit;
-        padding-right: inherit;
-        padding-top: inherit;
-        padding-bottom: inherit;
-        column-gap: inherit;
-        row-gap: inherit;
-        gap: inherit;
-        border-left-width: inherit;
-        border-right-width: inherit;
-        border-top-width: inherit;
-        border-bottom-width: inherit;
-        border-left-style: inherit;
-        border-right-style: inherit;
-        border-top-style: inherit;
-        border-bottom-style: inherit;
-        border-left-color: inherit;
-        border-right-color: inherit;
-        border-top-color: inherit;
-        border-bottom-color: inherit;
-    }
-}
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #050505; }
+::-webkit-scrollbar-thumb { background: #1A1A1A; }
+::-webkit-scrollbar-thumb:hover { background: #2A2A2A; }
