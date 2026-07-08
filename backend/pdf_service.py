@@ -139,3 +139,239 @@ def build_audit_pdf(audit: dict) -> bytes:
 
     doc.build(story, onFirstPage=_page_bg, onLaterPages=_page_bg)
     return buf.getvalue()
+
+
+
+def build_board_brief_pdf(audit: dict) -> bytes:
+    """Single-page executive Board Brief — clinical intelligence report format."""
+    from datetime import datetime, timezone
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=16 * mm, rightMargin=16 * mm,
+        topMargin=14 * mm, bottomMargin=14 * mm,
+        title=f"AuditEngine Board Brief — {audit.get('client_name','')}",
+    )
+
+    WHITE_BORDER = colors.HexColor("#FFFFFF")
+    mono = ParagraphStyle("mono", fontName="Courier", fontSize=8, textColor=TEXT, leading=11)
+    mono_sec = ParagraphStyle("mono_sec", fontName="Courier", fontSize=7, textColor=SECONDARY, leading=10, letterSpacing=1)
+    verdict = ParagraphStyle("verdict", fontName="Helvetica", fontSize=11, textColor=TEXT, leading=16)
+    label = ParagraphStyle("label", fontName="Courier", fontSize=7, textColor=SECONDARY, leading=10, letterSpacing=1.4)
+    metric_l = ParagraphStyle("metric_l", fontName="Courier", fontSize=18, textColor=TEXT, leading=22)
+
+    score = int(audit.get("compliance_score", 0) or 0)
+    score_color = COMPLIANT if score >= 80 else MODERATE if score >= 60 else CRITICAL
+    score_hex = "#00FF41" if score >= 80 else "#FFBF00" if score >= 60 else "#FF0000"
+    generated = datetime.now(timezone.utc).strftime("%Y-%m-%d · %H:%M UTC")
+
+    story = []
+
+    # ---- TOP: Client / Date / Score ----
+    top = [[
+        Paragraph("<font color='#808080'>// CLIENT</font>", label),
+        Paragraph("<font color='#808080'>// GENERATED</font>", label),
+        Paragraph("<font color='#808080'>// CASE</font>", label),
+    ], [
+        Paragraph(f"<b>{audit.get('client_name','')}</b>", ParagraphStyle("client", fontName="Helvetica-Bold", fontSize=13, textColor=TEXT, leading=15)),
+        Paragraph(generated, mono),
+        Paragraph(audit.get("audit_id", "").upper(), mono_sec),
+    ]]
+    top_tbl = Table(top, colWidths=[80 * mm, 55 * mm, 43 * mm])
+    top_tbl.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.5, WHITE_BORDER),
+        ("LINEABOVE", (0, 1), (-1, 1), 0.5, WHITE_BORDER),
+        ("BACKGROUND", (0, 0), (-1, -1), BLACK),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    story.append(top_tbl)
+    story.append(Spacer(1, 4 * mm))
+
+    # ---- SCORE HERO ----
+    hero = [[
+        Paragraph("<font color='#808080'>// COMPLIANCE SCORE</font>", label),
+    ], [
+        Paragraph(
+            f"<font color='{score_hex}' name='Courier'><b>{score:03d}</b></font>"
+            "<font color='#808080' size='10'> / 100</font>",
+            ParagraphStyle("heroScore", fontName="Courier-Bold", fontSize=64, textColor=score_color, leading=68, alignment=1),
+        ),
+    ], [
+        Paragraph(
+            "MATERIALLY COMPLIANT" if score >= 80 else "PARTIAL ALIGNMENT" if score >= 60 else "NON-COMPLIANT POSTURE",
+            ParagraphStyle("heroLbl", fontName="Courier-Bold", fontSize=9, textColor=score_color, leading=12, alignment=1, letterSpacing=3),
+        ),
+    ]]
+    hero_tbl = Table(hero, colWidths=[178 * mm])
+    hero_tbl.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.5, WHITE_BORDER),
+        ("BACKGROUND", (0, 0), (-1, -1), BLACK),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, 0), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 2),
+        ("TOPPADDING", (0, 1), (-1, 1), 4),
+        ("BOTTOMPADDING", (0, 1), (-1, 1), 0),
+        ("TOPPADDING", (0, 2), (-1, 2), 0),
+        ("BOTTOMPADDING", (0, 2), (-1, 2), 10),
+    ]))
+    story.append(hero_tbl)
+    story.append(Spacer(1, 4 * mm))
+
+    # ---- EXECUTIVE VERDICT ----
+    verdict_text = audit.get("executive_summary") or "Verdict pending."
+    verdict_block = Table([
+        [Paragraph("<font color='#808080'>// THE BOTTOM LINE — EXECUTIVE VERDICT</font>", label)],
+        [Paragraph(verdict_text, verdict)],
+    ], colWidths=[178 * mm])
+    verdict_block.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.5, WHITE_BORDER),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.5, WHITE_BORDER),
+        ("BACKGROUND", (0, 0), (-1, -1), BLACK),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+    ]))
+    story.append(verdict_block)
+    story.append(Spacer(1, 4 * mm))
+
+    # ---- FINANCIAL IMPACT ----
+    vas = float(audit.get("value_at_stake_eur") or 0)
+    total_saving = sum(float(r.get("saving_eur") or 0) for r in (audit.get("roadmap") or []))
+    total_cost = sum(float(r.get("implementation_cost_eur") or 0) for r in (audit.get("roadmap") or []))
+
+    fin = Table([
+        [
+            Paragraph("<font color='#808080'>// COST OF NON-COMPLIANCE</font>", label),
+            Paragraph("<font color='#808080'>// POTENTIAL SAVINGS</font>", label),
+            Paragraph("<font color='#808080'>// NET RECOVERABLE</font>", label),
+        ],
+        [
+            Paragraph(f"<font color='#FF0000'>€ {vas:,.0f}</font>", ParagraphStyle("neg", fontName="Courier-Bold", fontSize=18, textColor=CRITICAL, leading=22)),
+            Paragraph(f"<font color='#00FF41'>€ {total_saving:,.0f}</font>", ParagraphStyle("pos", fontName="Courier-Bold", fontSize=18, textColor=COMPLIANT, leading=22)),
+            Paragraph(f"<font color='#E8E8E8'>€ {max(total_saving - total_cost, 0):,.0f}</font>", metric_l),
+        ],
+        [
+            Paragraph("Quantified exposure if gaps unaddressed.", mono_sec),
+            Paragraph("Roadmap-projected value capture.", mono_sec),
+            Paragraph(f"After € {total_cost:,.0f} implementation cost.", mono_sec),
+        ],
+    ], colWidths=[59.3 * mm, 59.3 * mm, 59.3 * mm])
+    fin.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.5, WHITE_BORDER),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, WHITE_BORDER),
+        ("BACKGROUND", (0, 0), (-1, -1), BLACK),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    story.append(fin)
+    story.append(Spacer(1, 4 * mm))
+
+    # ---- TOP 3 CRITICAL RISKS ----
+    findings = audit.get("findings", []) or []
+    order = {"CRITICAL": 0, "MODERATE": 1, "COMPLIANT": 2}
+    top_risks = sorted(
+        [f for f in findings if f.get("severity") != "COMPLIANT"],
+        key=lambda f: (order.get(f.get("severity"), 9), -(f.get("impact_score") or 0)),
+    )[:3]
+
+    risk_rows = [[Paragraph("<font color='#808080'>// TOP 3 CRITICAL RISKS</font>", label)]]
+    risk_tbl_hdr = Table(risk_rows, colWidths=[178 * mm])
+    risk_tbl_hdr.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.5, WHITE_BORDER),
+        ("BACKGROUND", (0, 0), (-1, -1), BLACK),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(risk_tbl_hdr)
+
+    for i, f in enumerate(top_risks, 1):
+        sev = f.get("severity", "CRITICAL")
+        sev_c = _sev_color(sev)
+        sev_hex = {"CRITICAL": "#FF0000", "MODERATE": "#FFBF00", "COMPLIANT": "#00FF41"}.get(sev, "#808080")
+        row = Table([[
+            Paragraph(f"<font color='{sev_hex}' name='Courier-Bold' size='16'>0{i}</font>", ParagraphStyle("num", fontName="Courier-Bold", fontSize=16, textColor=sev_c, leading=18)),
+            [
+                Paragraph(f"<b><font color='#E8E8E8'>{f.get('data_point','')}</font></b>", ParagraphStyle("dp", fontName="Helvetica-Bold", fontSize=9, textColor=TEXT, leading=12)),
+                Paragraph(f.get("finding_detail", "")[:220], ParagraphStyle("dt", fontName="Helvetica", fontSize=8, textColor=TEXT, leading=11)),
+            ],
+            [
+                Paragraph(f"<font color='{sev_hex}'>[{sev}]</font>", ParagraphStyle("sv", fontName="Courier-Bold", fontSize=7, textColor=sev_c, leading=10, letterSpacing=1.5, alignment=2)),
+                Paragraph(f"<font color='#808080'>{f.get('regulatory_ref','')}</font>", ParagraphStyle("rr", fontName="Courier", fontSize=7, textColor=SECONDARY, leading=10, alignment=2)),
+                Paragraph(f"<font color='#808080'>STATUS: {f.get('status','')}</font>", ParagraphStyle("st", fontName="Courier", fontSize=7, textColor=SECONDARY, leading=10, alignment=2)),
+            ],
+        ]], colWidths=[12 * mm, 116 * mm, 50 * mm])
+        row.setStyle(TableStyle([
+            ("BOX", (0, 0), (-1, -1), 0.5, WHITE_BORDER),
+            ("LINEABOVE", (0, 0), (-1, 0), 0, BLACK),
+            ("BACKGROUND", (0, 0), (-1, -1), BLACK),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        story.append(row)
+
+    story.append(Spacer(1, 4 * mm))
+
+    # ---- TOP 3 IMMEDIATE FIXES ----
+    roadmap = (audit.get("roadmap") or [])[:3]
+    fx_hdr = Table([[Paragraph("<font color='#808080'>// THE ACTION PATH — TOP 3 IMMEDIATE FIXES</font>", label)]], colWidths=[178 * mm])
+    fx_hdr.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.5, WHITE_BORDER),
+        ("BACKGROUND", (0, 0), (-1, -1), BLACK),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(fx_hdr)
+
+    for i, r in enumerate(roadmap, 1):
+        row = Table([[
+            Paragraph(f"<font color='#00FF41' name='Courier-Bold' size='14'>→ 0{i}</font>", ParagraphStyle("fxn", fontName="Courier-Bold", fontSize=14, textColor=COMPLIANT, leading=16)),
+            [
+                Paragraph(f"<b><font color='#E8E8E8'>{r.get('action','')}</font></b>", ParagraphStyle("fxa", fontName="Helvetica-Bold", fontSize=9, textColor=TEXT, leading=12)),
+                Paragraph(f"<font color='#808080'>{r.get('metric_impact','')}</font>", ParagraphStyle("fxm", fontName="Courier", fontSize=7, textColor=SECONDARY, leading=10)),
+            ],
+            [
+                Paragraph(f"<font color='#00FF41'>€ {float(r.get('saving_eur') or 0):,.0f}</font>", ParagraphStyle("fxs", fontName="Courier-Bold", fontSize=10, textColor=COMPLIANT, leading=12, alignment=2)),
+                Paragraph(f"<font color='#808080'>SAVING</font>", ParagraphStyle("fxsl", fontName="Courier", fontSize=6, textColor=SECONDARY, leading=8, alignment=2)),
+            ],
+            [
+                Paragraph(f"<font color='#FFBF00'>{int(r.get('payback_months') or 0)} MO</font>", ParagraphStyle("fxp", fontName="Courier-Bold", fontSize=10, textColor=MODERATE, leading=12, alignment=2)),
+                Paragraph(f"<font color='#808080'>PAYBACK</font>", ParagraphStyle("fxpl", fontName="Courier", fontSize=6, textColor=SECONDARY, leading=8, alignment=2)),
+            ],
+        ]], colWidths=[16 * mm, 100 * mm, 32 * mm, 30 * mm])
+        row.setStyle(TableStyle([
+            ("BOX", (0, 0), (-1, -1), 0.5, WHITE_BORDER),
+            ("BACKGROUND", (0, 0), (-1, -1), BLACK),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 8),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        story.append(row)
+
+    def _page_bg(canvas, doc):
+        canvas.saveState()
+        canvas.setFillColor(BLACK)
+        canvas.rect(0, 0, doc.pagesize[0], doc.pagesize[1], fill=1, stroke=0)
+        canvas.setFillColor(SECONDARY)
+        canvas.setFont("Courier", 6.5)
+        canvas.drawString(16 * mm, 7 * mm, "AUDITENGINE // BOARD BRIEF // CONFIDENTIAL")
+        canvas.drawRightString(doc.pagesize[0] - 16 * mm, 7 * mm, "THE MIRROR OF CERTAINTY")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=_page_bg, onLaterPages=_page_bg)
+    return buf.getvalue()

@@ -11,7 +11,7 @@ from datetime import datetime, timezone, timedelta
 import httpx
 
 from llm_service import analyze_documents
-from pdf_service import build_audit_pdf
+from pdf_service import build_audit_pdf, build_board_brief_pdf
 from file_extractor import extract_text_from_file
 
 ROOT_DIR = Path(__file__).parent
@@ -282,6 +282,21 @@ async def download_pdf(audit_id: str, user: dict = Depends(get_current_user)):
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="AuditEngine_{audit["client_name"]}_{audit["reporting_year"]}.pdf"'},
+    )
+
+
+@api_router.get("/audits/{audit_id}/board-brief")
+async def download_board_brief(audit_id: str, user: dict = Depends(get_current_user)):
+    audit = await db.audits.find_one({"audit_id": audit_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not audit:
+        raise HTTPException(status_code=404, detail="Audit not found")
+    if audit.get("status") != "COMPLETE":
+        raise HTTPException(status_code=400, detail="Audit not complete")
+    pdf_bytes = build_board_brief_pdf(audit)
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="AuditEngine_BoardBrief_{audit["client_name"]}_{audit["reporting_year"]}.pdf"'},
     )
 
 

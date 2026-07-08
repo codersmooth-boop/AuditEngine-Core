@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getAudit, pdfUrl } from "../lib/api";
+import { getAudit, pdfUrl, boardBriefUrl } from "../lib/api";
 import IntakeZone from "../components/IntakeZone";
 import ProcessingPanel from "../components/ProcessingPanel";
 import KPIStrip from "../components/KPIStrip";
@@ -145,12 +145,23 @@ export default function AuditView() {
               <div className="ae-border-strong p-6">
                 <div className="mono text-[10px] tracking-[0.3em] text-[#808080]">// PDF DELIVERY</div>
                 <div className="sans text-xl font-light mt-2">Signed audit report ready.</div>
-                <a
-                  href={pdfUrl(audit.audit_id)}
-                  target="_blank" rel="noreferrer"
-                  data-testid="download-pdf-btn"
-                  className="mt-4 inline-block mono text-xs tracking-[0.2em] ae-border-strong px-6 py-3 bg-[#00FF41] text-black hover:bg-white transition-colors"
-                >↓ DOWNLOAD REPORT (PDF)</a>
+                <div className="mt-4 flex flex-col gap-3">
+                  <a
+                    href={pdfUrl(audit.audit_id)}
+                    target="_blank" rel="noreferrer"
+                    data-testid="download-pdf-btn"
+                    className="mono text-xs tracking-[0.2em] ae-border-strong px-6 py-3 bg-[#00FF41] text-black hover:bg-white transition-colors text-center"
+                  >↓ DOWNLOAD FULL REPORT (PDF)</a>
+                  <a
+                    href={boardBriefUrl(audit.audit_id)}
+                    target="_blank" rel="noreferrer"
+                    data-testid="board-brief-btn"
+                    className="mono text-xs tracking-[0.2em] ae-border-strong px-6 py-3 bg-black text-[#E8E8E8] hover:bg-[#0D0D0D] hover:text-white transition-colors text-center"
+                  >⧉ GENERATE BOARD BRIEF (1-PAGE)</a>
+                  <div className="mono text-[10px] text-[#808080] leading-relaxed">
+                    Board Brief: single-page executive verdict, financial impact, top 3 risks &amp; fixes.
+                  </div>
+                </div>
               </div>
 
               <div className="ae-border-strong">

@@ -59,3 +59,7 @@ export async function uploadFiles(id, files) {
 export function pdfUrl(id) {
   return `${API}/audits/${id}/pdf`;
 }
+
+export function boardBriefUrl(id) {
+  return `${API}/audits/${id}/board-brief`;
+}
