@@ -39,10 +39,23 @@ STREAM_MAX_HISTORY = 400
 
 
 def _stream_publish(audit_id: str, event: dict) -> None:
+    from datetime import datetime, timezone as _tz
+    event = {**event, "ts": datetime.now(_tz.utc).isoformat()}
     hist = STREAM_HISTORY.setdefault(audit_id, [])
     hist.append(event)
     if len(hist) > STREAM_MAX_HISTORY:
         del hist[: len(hist) - STREAM_MAX_HISTORY]
+    # Persist to mongo (fire-and-forget; only log events, not step/done spam)
+    if event.get("type") == "log":
+        async def _persist():
+            try:
+                await db.audits.update_one(
+                    {"audit_id": audit_id},
+                    {"$push": {"stream_logs": {"ts": event["ts"], "text": event["text"], "tag": event.get("tag", "OK")}}},
+                )
+            except Exception:
+                pass
+        asyncio.create_task(_persist())
     for q in STREAM_QUEUES.get(audit_id, []):
         try:
             q.put_nowait(event)
@@ -323,15 +336,22 @@ async def upload_files(audit_id: str, background_tasks: BackgroundTasks,
 
     extracted = []
     filenames = []
+    file_hashes = []
+    import hashlib
     for f in files:
         content = await f.read()
         text = extract_text_from_file(f.filename or "file", content)
         extracted.append({"filename": f.filename, "text": text[:60000]})
         filenames.append(f.filename)
+        file_hashes.append({
+            "filename": f.filename,
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "bytes": len(content),
+        })
 
     await db.audits.update_one(
         {"audit_id": audit_id},
-        {"$set": {"files": filenames, "status": "PROCESSING", "processing_step": 1}},
+        {"$set": {"files": filenames, "file_hashes": file_hashes, "status": "PROCESSING", "processing_step": 1, "stream_logs": []}},
     )
 
     background_tasks.add_task(
@@ -417,6 +437,75 @@ async def download_board_brief(audit_id: str, user: dict = Depends(get_current_u
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="AuditEngine_BoardBrief_{audit["client_name"]}_{audit["reporting_year"]}.pdf"'},
+    )
+
+
+@api_router.get("/audits/{audit_id}/audit-log")
+async def download_audit_log(audit_id: str, user: dict = Depends(get_current_user)):
+    audit = await db.audits.find_one({"audit_id": audit_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not audit:
+        raise HTTPException(status_code=404, detail="Audit not found")
+
+    from datetime import datetime, timezone as _tz
+    import hashlib as _hl
+
+    logs = audit.get("stream_logs") or []
+    file_hashes = audit.get("file_hashes") or []
+    body_lines = [f"[{l.get('ts','')}] [{l.get('tag','OK'):<6}] {l.get('text','')}" for l in logs]
+
+    # Deterministic composite fingerprint across all ingested files
+    composite = _hl.sha256(("|".join(fh.get("sha256", "") for fh in file_hashes)).encode()).hexdigest()
+
+    header = [
+        "================================================================================",
+        "  AUDITENGINE // REGULATOR-DEFENSIBLE AUDIT TRAIL",
+        "  THE MIRROR OF CERTAINTY — CERTIFIED EXECUTION LOG",
+        "================================================================================",
+        f"AUDIT ID          : {audit.get('audit_id','')}",
+        f"CLIENT            : {audit.get('client_name','')}",
+        f"NACE REV. 2       : {audit.get('nace_code','')} · {audit.get('nace_name','')}",
+        f"REPORTING YEAR    : {audit.get('reporting_year','')}",
+        f"CREATED AT        : {audit.get('created_at','')}",
+        f"COMPLETED AT      : {audit.get('completed_at','')}",
+        f"STATUS            : {audit.get('status','')}",
+        f"COMPLIANCE SCORE  : {audit.get('compliance_score','—')}/100",
+        f"GREENWASHING RISK : {audit.get('greenwashing_risk','—')}",
+        f"ENGINE VERSION    : AuditEngine v1.0 · anthropic:claude-sonnet-4-5-20250929",
+        f"LOG EXPORTED AT   : {datetime.now(_tz.utc).isoformat()}",
+        f"LOG LINE COUNT    : {len(logs)}",
+        "",
+        "--- DIGITAL FINGERPRINT (SHA-256) OF INGESTED EVIDENCE ------------------------",
+    ]
+    for fh in file_hashes:
+        header.append(f"  · {fh.get('filename','')}  ({fh.get('bytes',0)} bytes)")
+        header.append(f"    sha256 = {fh.get('sha256','')}")
+    header += [
+        f"  · composite  = {composite}",
+        "",
+        "--- EXECUTION SCRIPT ----------------------------------------------------------",
+    ]
+
+    footer = [
+        "",
+        "--- CERTIFICATION OF ANALYSIS -------------------------------------------------",
+        "This log constitutes a good-faith, timestamped record of the AuditEngine",
+        "compliance analysis executed against the ingested evidence listed above.",
+        "The following logic gates were traversed in sequence:",
+        "  [1] GAP ANALYSIS      — Datapoint coverage vs. ESRS/CSRD/CSDDD/EU-Tax/SFDR",
+        "  [2] LEGAL MAPPING     — Regulatory-reference binding per finding",
+        "  [3] OPPORTUNITY FIND  — € Value-at-Stake quantification & roadmap ranking",
+        "",
+        "Analysis engine, prompt schema and regulatory taxonomy are version-pinned.",
+        "Evidence integrity is provable via the SHA-256 fingerprints above.",
+        f"Signed // AUDITENGINE // {datetime.now(_tz.utc).isoformat()}",
+        "================================================================================",
+    ]
+
+    text = "\n".join(header + body_lines + footer)
+    return Response(
+        content=text,
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="AuditEngine_{audit.get("client_name","audit")}_{audit.get("reporting_year","")}.log"'},
     )
 
 

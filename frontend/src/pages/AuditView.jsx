@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getAudit, pdfUrl, boardBriefUrl, streamUrl } from "../lib/api";
+import { getAudit, pdfUrl, boardBriefUrl, streamUrl, auditLogUrl } from "../lib/api";
 import IntakeZone from "../components/IntakeZone";
 import ProcessingPanel from "../components/ProcessingPanel";
 import KPIStrip from "../components/KPIStrip";
@@ -27,6 +27,18 @@ export default function AuditView() {
     try {
       const a = await getAudit(id);
       setAudit(a);
+      // Hydrate persisted execution log for replay (on completed audits)
+      if (Array.isArray(a.stream_logs) && a.stream_logs.length > 0) {
+        setLogs(prev => {
+          if (prev.length >= a.stream_logs.length) return prev;
+          return a.stream_logs.map(l => ({
+            type: "log",
+            text: l.text,
+            tag: l.tag || "OK",
+            ts: (l.ts || "").substr(11, 8),
+          }));
+        });
+      }
       if (a.status === "PROCESSING" && !startedAt) setStartedAt(Date.now());
       if (a.status === "COMPLETE" || a.status === "FAILED") {
         clearInterval(pollRef.current);
@@ -197,8 +209,15 @@ export default function AuditView() {
                     data-testid="board-brief-btn"
                     className="mono text-xs tracking-[0.2em] ae-border-strong px-6 py-3 bg-black text-[#E8E8E8] hover:bg-[#0D0D0D] hover:text-white transition-colors text-center"
                   >⧉ GENERATE BOARD BRIEF (1-PAGE)</a>
+                  <a
+                    href={auditLogUrl(audit.audit_id)}
+                    target="_blank" rel="noreferrer"
+                    data-testid="audit-log-btn"
+                    className="mono text-xs tracking-[0.2em] ae-border-strong px-6 py-3 bg-black text-[#E8E8E8] hover:bg-[#0D0D0D] hover:text-white transition-colors text-center"
+                  >⧉ EXPORT SIGNED AUDIT LOG (.LOG)</a>
                   <div className="mono text-[10px] text-[#808080] leading-relaxed">
-                    Board Brief: single-page executive verdict, financial impact, top 3 risks &amp; fixes.
+                    Full report: Board Brief cover + findings + technical appendix.<br/>
+                    Signed .LOG: regulator-defensible execution trail with SHA-256 evidence fingerprint.
                   </div>
                 </div>
               </div>

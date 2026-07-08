@@ -67,3 +67,7 @@ export function boardBriefUrl(id) {
 export function streamUrl(id) {
   return `${API}/audits/${id}/stream`;
 }
+
+export function auditLogUrl(id) {
+  return `${API}/audits/${id}/audit-log`;
+}
