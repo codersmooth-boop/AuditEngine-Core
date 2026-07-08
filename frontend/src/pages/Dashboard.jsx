@@ -42,7 +42,10 @@ export default function Dashboard() {
       <header className="ae-border-strong border-b flex items-center justify-between px-8 py-4">
         <div className="flex items-center gap-8">
           <div className="mono text-xs tracking-[0.2em]">AUDITENGINE</div>
-          <div className="mono text-[10px] text-[#808080]">// WORKSPACE</div>
+          <div className="flex gap-6">
+            <span className="mono text-[10px] tracking-widest text-[#00FF41]">// WORKSPACE</span>
+            <button data-testid="nav-ledger" onClick={() => nav("/ledger")} className="mono text-[10px] tracking-widest text-[#808080] hover:text-white">⧉ COMPLIANCE LEDGER</button>
+          </div>
         </div>
         <div className="flex items-center gap-6">
           <UtcClock />

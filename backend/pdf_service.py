@@ -428,8 +428,15 @@ def build_board_brief_pdf(audit: dict) -> bytes:
         canvas.rect(0, 0, doc.pagesize[0], doc.pagesize[1], fill=1, stroke=0)
         canvas.setFillColor(SECONDARY)
         canvas.setFont("Courier", 6.5)
-        canvas.drawString(16 * mm, 7 * mm, "AUDITENGINE // BOARD BRIEF // CONFIDENTIAL")
-        canvas.drawRightString(doc.pagesize[0] - 16 * mm, 7 * mm, "THE MIRROR OF CERTAINTY")
+        canvas.drawString(16 * mm, 10 * mm, "AUDITENGINE // BOARD BRIEF // CONFIDENTIAL")
+        canvas.drawRightString(doc.pagesize[0] - 16 * mm, 10 * mm, "THE MIRROR OF CERTAINTY")
+        # Verified evidence chain
+        import hashlib as _hl
+        fh = audit.get("file_hashes") or []
+        composite_hash = _hl.sha256(("|".join(x.get("sha256", "") for x in fh)).encode()).hexdigest() if fh else "—"
+        canvas.setFillColor(colors.HexColor("#00FF41"))
+        canvas.setFont("Courier", 6.5)
+        canvas.drawString(16 * mm, 6 * mm, f"VERIFIED EVIDENCE CHAIN: {composite_hash}")
         canvas.restoreState()
 
     doc.build(story, onFirstPage=_page_bg, onLaterPages=_page_bg)

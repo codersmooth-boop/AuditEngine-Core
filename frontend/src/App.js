@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from "@/lib/auth";
 import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import AuditView from "@/pages/AuditView";
+import Ledger from "@/pages/Ledger";
 import AuthCallback from "@/pages/AuthCallback";
 
 function Protected({ children }) {
@@ -21,6 +22,7 @@ function RouterShell() {
     <Routes>
       <Route path="/" element={<Login />} />
       <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
+      <Route path="/ledger" element={<Protected><Ledger /></Protected>} />
       <Route path="/audits/:id" element={<Protected><AuditView /></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
