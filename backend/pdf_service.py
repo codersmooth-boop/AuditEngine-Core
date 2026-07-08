@@ -1,5 +1,6 @@
 """Generate a terminal-styled PDF audit report using reportlab."""
 import io
+from pypdf import PdfWriter, PdfReader
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -21,6 +22,21 @@ def _sev_color(sev: str):
 
 
 def build_audit_pdf(audit: dict) -> bytes:
+    """Full report = [Board Brief cover] + [Detailed Findings] + [Technical Appendix]."""
+    body_bytes = _build_full_body(audit)
+    cover_bytes = build_board_brief_pdf(audit)
+
+    writer = PdfWriter()
+    for src in (cover_bytes, body_bytes):
+        reader = PdfReader(io.BytesIO(src))
+        for page in reader.pages:
+            writer.add_page(page)
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
+def _build_full_body(audit: dict) -> bytes:
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=A4,
@@ -126,6 +142,49 @@ def build_audit_pdf(audit: dict) -> bytes:
             ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ]))
         story.append(tbl)
+
+    # ---------- TECHNICAL APPENDIX ----------
+    story.append(PageBreak())
+    story.append(Paragraph("TECHNICAL APPENDIX", h2))
+
+    appendix_rows = [
+        ["AUDIT ID", audit.get("audit_id", "—")],
+        ["CLIENT", audit.get("client_name", "—")],
+        ["NACE REV. 2", f"{audit.get('nace_code','—')} · {audit.get('nace_name','—')}"],
+        ["REPORTING YEAR", str(audit.get("reporting_year", "—"))],
+        ["STATUS", audit.get("status", "—")],
+        ["CREATED AT", str(audit.get("created_at", "—"))],
+        ["COMPLETED AT", str(audit.get("completed_at", "—"))],
+        ["GREENWASHING RISK", audit.get("greenwashing_risk", "—")],
+        ["TOTAL FINDINGS", str(len(audit.get("findings", [])))],
+        ["CRITICAL COUNT", str(audit.get("critical_findings_count", 0))],
+        ["ANALYSIS ENGINE", "Claude Sonnet 4.5 (anthropic:claude-sonnet-4-5-20250929)"],
+    ]
+    ap_tbl = Table(appendix_rows, colWidths=[45 * mm, 130 * mm])
+    ap_tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, -1), SURFACE),
+        ("TEXTCOLOR", (0, 0), (0, -1), SECONDARY),
+        ("TEXTCOLOR", (1, 0), (1, -1), TEXT),
+        ("FONTNAME", (0, 0), (-1, -1), "Courier"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("BOX", (0, 0), (-1, -1), 0.5, BORDER),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, BORDER),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]))
+    story.append(ap_tbl)
+    story.append(Spacer(1, 6 * mm))
+
+    files = audit.get("files") or []
+    story.append(Paragraph("FILES INGESTED", h2))
+    if files:
+        for i, fn in enumerate(files, 1):
+            story.append(Paragraph(f"[{i:03d}] {fn}", mono))
+    else:
+        story.append(Paragraph("— no files on record —", mono_sec))
 
     def _page_bg(canvas, doc):
         canvas.saveState()

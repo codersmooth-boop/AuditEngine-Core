@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getAudit, pdfUrl, boardBriefUrl } from "../lib/api";
+import { getAudit, pdfUrl, boardBriefUrl, streamUrl } from "../lib/api";
 import IntakeZone from "../components/IntakeZone";
 import ProcessingPanel from "../components/ProcessingPanel";
 import KPIStrip from "../components/KPIStrip";
@@ -17,7 +17,11 @@ export default function AuditView() {
   const [audit, setAudit] = useState(null);
   const [resolved, setResolved] = useState(new Set());
   const [startedAt, setStartedAt] = useState(null);
+  const [logs, setLogs] = useState([]);
+  const [streamMode, setStreamMode] = useState("sse"); // sse | poll
   const pollRef = useRef(null);
+  const esRef = useRef(null);
+  const streamStepRef = useRef(0);
 
   const load = async () => {
     try {
@@ -26,16 +30,51 @@ export default function AuditView() {
       if (a.status === "PROCESSING" && !startedAt) setStartedAt(Date.now());
       if (a.status === "COMPLETE" || a.status === "FAILED") {
         clearInterval(pollRef.current);
+        if (esRef.current) { esRef.current.close(); esRef.current = null; }
       }
     } catch {
       nav("/dashboard");
     }
   };
 
+  // Open SSE stream when processing; auto-fallback to poll on error.
+  useEffect(() => {
+    if (!audit || audit.status !== "PROCESSING" || esRef.current) return;
+    try {
+      const es = new EventSource(streamUrl(audit.audit_id), { withCredentials: true });
+      esRef.current = es;
+      setStreamMode("sse");
+      es.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data);
+          if (data.type === "log") {
+            const ts = new Date().toISOString().substr(11, 8);
+            setLogs(prev => [...prev.slice(-300), { ...data, ts }]);
+          } else if (data.type === "step") {
+            streamStepRef.current = data.step;
+            setAudit(a => a ? { ...a, processing_step: data.step } : a);
+          } else if (data.type === "done") {
+            load();
+          }
+        } catch { /* ignore */ }
+      };
+      es.onerror = () => {
+        // Fallback: close and rely on polling
+        es.close(); esRef.current = null;
+        setStreamMode("poll");
+      };
+    } catch {
+      setStreamMode("poll");
+    }
+  }, [audit?.status, audit?.audit_id]);
+
   useEffect(() => {
     load();
-    pollRef.current = setInterval(load, 1200);
-    return () => clearInterval(pollRef.current);
+    pollRef.current = setInterval(load, 1500);
+    return () => {
+      clearInterval(pollRef.current);
+      if (esRef.current) { esRef.current.close(); esRef.current = null; }
+    };
   }, [id]);
 
   if (!audit) {
@@ -103,7 +142,7 @@ export default function AuditView() {
               <span className="mono text-[10px] text-[#808080] ml-6 truncate">{(audit.files || []).join(" · ")}</span>
             </div>
           </div>
-          <ProcessingPanel step={audit.processing_step || 1} startedAt={startedAt || Date.now()} />
+          <ProcessingPanel step={audit.processing_step || 1} startedAt={startedAt || Date.now()} logs={logs} streamMode={streamMode} />
         </>
       )}
 

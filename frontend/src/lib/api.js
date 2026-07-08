@@ -63,3 +63,7 @@ export function pdfUrl(id) {
 export function boardBriefUrl(id) {
   return `${API}/audits/${id}/board-brief`;
 }
+
+export function streamUrl(id) {
+  return `${API}/audits/${id}/stream`;
+}
