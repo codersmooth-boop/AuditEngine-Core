@@ -71,3 +71,7 @@ export function streamUrl(id) {
 export function auditLogUrl(id) {
   return `${API}/audits/${id}/audit-log`;
 }
+
+export function snapshotUrl(year) {
+  return `${API}/ledger/snapshot?year=${year}`;
+}

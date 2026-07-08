@@ -11,7 +11,7 @@ from datetime import datetime, timezone, timedelta
 import httpx
 
 from llm_service import analyze_documents
-from pdf_service import build_audit_pdf, build_board_brief_pdf
+from pdf_service import build_audit_pdf, build_board_brief_pdf, build_snapshot_pdf
 from file_extractor import extract_text_from_file
 
 ROOT_DIR = Path(__file__).parent
@@ -506,6 +506,36 @@ async def download_audit_log(audit_id: str, user: dict = Depends(get_current_use
         content=text,
         media_type="text/plain; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="AuditEngine_{audit.get("client_name","audit")}_{audit.get("reporting_year","")}.log"'},
+    )
+
+
+@api_router.get("/ledger/snapshot")
+async def ledger_snapshot(year: int, user: dict = Depends(get_current_user)):
+    import hashlib as _hl
+    docs = await db.audits.find({"user_id": user["user_id"], "reporting_year": year, "status": "COMPLETE"}, {"_id": 0}).sort("created_at", 1).to_list(500)
+    entries = []
+    for a in docs:
+        fh = a.get("file_hashes") or []
+        composite = _hl.sha256(("|".join(x.get("sha256", "") for x in fh)).encode()).hexdigest() if fh else ""
+        entries.append({
+            "audit_id": a.get("audit_id", ""),
+            "client_name": a.get("client_name", ""),
+            "nace_code": a.get("nace_code", ""),
+            "nace_name": a.get("nace_name", ""),
+            "created_at": a.get("created_at", ""),
+            "completed_at": a.get("completed_at", ""),
+            "compliance_score": a.get("compliance_score"),
+            "value_at_stake_eur": a.get("value_at_stake_eur") or 0,
+            "critical_findings_count": a.get("critical_findings_count") or 0,
+            "greenwashing_risk": a.get("greenwashing_risk", "NONE"),
+            "composite_hash": composite,
+        })
+    merkle_root = _hl.sha256(("|".join(e["composite_hash"] for e in entries)).encode()).hexdigest() if entries else _hl.sha256(b"").hexdigest()
+    pdf_bytes = build_snapshot_pdf(entries, year, merkle_root, workspace_email=user.get("email", ""))
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="AuditEngine_Snapshot_FY{year}.pdf"'},
     )
 
 

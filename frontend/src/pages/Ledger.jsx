@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { listAudits } from "../lib/api";
+import { listAudits, snapshotUrl } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import UtcClock from "../components/UtcClock";
+import VerifierModal from "../components/VerifierModal";
 
 // SHA-256 helper for composite fingerprint (browser-side, deterministic)
 async function composite(hashes) {
@@ -21,7 +22,11 @@ export default function Ledger() {
   const [audits, setAudits] = useState([]);
   const [q, setQ] = useState("");
   const [hashes, setHashes] = useState({});
+  const [fullHashes, setFullHashes] = useState({});
   const [loading, setLoading] = useState(true);
+  const [verifying, setVerifying] = useState(null);
+  const currentYear = new Date().getUTCFullYear();
+  const [year, setYear] = useState(currentYear - 1);
 
   useEffect(() => {
     (async () => {
@@ -29,8 +34,14 @@ export default function Ledger() {
         const list = await listAudits();
         setAudits(list);
         const map = {};
-        for (const a of list) map[a.audit_id] = (await composite(a.file_hashes || [])).slice(0, 16);
+        const full = {};
+        for (const a of list) {
+          const h = await composite(a.file_hashes || []);
+          full[a.audit_id] = h;
+          map[a.audit_id] = h === "—" ? "—" : h.slice(0, 16);
+        }
         setHashes(map);
+        setFullHashes(full);
       } finally { setLoading(false); }
     })();
   }, []);
@@ -66,19 +77,40 @@ export default function Ledger() {
         </div>
       </header>
 
-      <div className="ae-border-strong border-b px-8 py-10 flex items-end justify-between">
+      <div className="ae-border-strong border-b px-8 py-10 flex items-end justify-between gap-6">
         <div>
           <div className="mono text-[10px] text-[#808080] tracking-widest mb-3">// SYSTEM OF RECORD</div>
           <h1 className="sans text-5xl font-light tracking-tight">Compliance Ledger.</h1>
           <p className="mono text-xs text-[#808080] mt-3">{filtered.length} of {audits.length} audits · verified evidence chain per row</p>
         </div>
-        <input
-          data-testid="ledger-search"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search client · NACE · hash · year"
-          className="bg-[#050505] ae-border-strong px-4 py-3 mono text-xs text-[#E8E8E8] w-96 focus:outline-none focus:border-[#00FF41]"
-        />
+        <div className="flex items-end gap-3">
+          <div>
+            <div className="mono text-[10px] text-[#808080] tracking-widest mb-2">FY</div>
+            <select
+              data-testid="snapshot-year"
+              value={year}
+              onChange={(e) => setYear(Number(e.target.value))}
+              className="bg-[#050505] ae-border-strong px-3 py-3 mono text-xs text-[#E8E8E8] focus:outline-none focus:border-[#00FF41]"
+            >
+              {Array.from({ length: 8 }, (_, i) => currentYear - i).map(y =>
+                <option key={y} value={y}>{y}</option>
+              )}
+            </select>
+          </div>
+          <a
+            data-testid="snapshot-btn"
+            href={snapshotUrl(year)}
+            target="_blank" rel="noreferrer"
+            className="mono text-xs tracking-[0.2em] ae-border-strong px-6 py-3 bg-[#00FF41] text-black hover:bg-white transition-colors"
+          >⧉ GENERATE YEARLY SNAPSHOT</a>
+          <input
+            data-testid="ledger-search"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search client · NACE · hash · year"
+            className="bg-[#050505] ae-border-strong px-4 py-3 mono text-xs text-[#E8E8E8] w-72 focus:outline-none focus:border-[#00FF41]"
+          />
+        </div>
       </div>
 
       <div className="px-8">
@@ -88,7 +120,8 @@ export default function Ledger() {
           <div className="col-span-2">DATE</div>
           <div className="col-span-1">SCORE</div>
           <div className="col-span-1">RISK</div>
-          <div className="col-span-3">EVIDENCE HASH</div>
+          <div className="col-span-2">EVIDENCE HASH</div>
+          <div className="col-span-1 text-right">VERIFY</div>
         </div>
 
         {loading && <div className="mono text-xs text-[#808080] py-8 ae-cursor">LOADING LEDGER</div>}
@@ -112,10 +145,25 @@ export default function Ledger() {
             <div className="col-span-2 text-[#808080]">{(a.created_at || "").substr(0, 10)} · FY{a.reporting_year}</div>
             <div className="col-span-1" style={{ color: scoreColor(a.compliance_score) }}>{a.compliance_score ?? "—"}</div>
             <div className="col-span-1" style={{ color: RISK_COLOR[a.greenwashing_risk] || "#808080" }}>{a.greenwashing_risk || "—"}</div>
-            <div className="col-span-3 text-[#00FF41] truncate">{hashes[a.audit_id] || "—"}...</div>
+            <div className="col-span-2 text-[#00FF41] truncate">{hashes[a.audit_id] || "—"}...</div>
+            <div className="col-span-1 text-right">
+              <button
+                data-testid={`verify-btn-${a.audit_id}`}
+                onClick={(e) => { e.stopPropagation(); setVerifying(a); }}
+                className="mono text-[10px] tracking-widest text-[#808080] hover:text-[#00FF41]"
+              >VERIFY →</button>
+            </div>
           </div>
         ))}
       </div>
+
+      {verifying && (
+        <VerifierModal
+          audit={verifying}
+          expectedHash={fullHashes[verifying.audit_id]}
+          onClose={() => setVerifying(null)}
+        />
+      )}
     </div>
   );
 }

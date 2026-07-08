@@ -1,4 +1,6 @@
 """Generate a terminal-styled PDF audit report using reportlab."""
+from datetime import datetime, timezone
+
 import io
 from pypdf import PdfWriter, PdfReader
 from reportlab.lib.pagesizes import A4
@@ -441,3 +443,177 @@ def build_board_brief_pdf(audit: dict) -> bytes:
 
     doc.build(story, onFirstPage=_page_bg, onLaterPages=_page_bg)
     return buf.getvalue()
+
+
+def build_snapshot_pdf(entries: list, year: int, merkle_root: str, workspace_email: str = "") -> bytes:
+    """CFO Master-Doc: yearly snapshot of the compliance ledger."""
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=16 * mm, rightMargin=16 * mm,
+        topMargin=14 * mm, bottomMargin=14 * mm,
+        title=f"AuditEngine Statutory Snapshot FY{year}",
+    )
+    WHITE = colors.HexColor("#FFFFFF")
+
+    label = ParagraphStyle("label", fontName="Courier", fontSize=7, textColor=SECONDARY, leading=10, letterSpacing=1.4)
+    mono = ParagraphStyle("mono", fontName="Courier", fontSize=8, textColor=TEXT, leading=11)
+    mono_sec = ParagraphStyle("mono_sec", fontName="Courier", fontSize=7, textColor=SECONDARY, leading=10)
+    h1 = ParagraphStyle("h1", fontName="Helvetica-Bold", fontSize=22, textColor=TEXT, leading=26)
+
+    story = []
+
+    # ---------- PAGE 1 · EXECUTIVE ----------
+    story.append(Paragraph("<font color='#808080'>// STATUTORY AUDIT SNAPSHOT</font>", label))
+    story.append(Spacer(1, 2 * mm))
+    story.append(Paragraph(f"Workspace Compliance Posture · FY{year}", h1))
+    story.append(Paragraph(f"<font color='#808080'>Workspace: {workspace_email or '—'} · Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d · %H:%M UTC')}</font>", mono_sec))
+    story.append(Spacer(1, 6 * mm))
+
+    n = len(entries)
+    avg_score = int(round(sum((e["compliance_score"] or 0) for e in entries) / n)) if n else 0
+    total_vas = sum((e["value_at_stake_eur"] or 0) for e in entries)
+    total_crit = sum((e["critical_findings_count"] or 0) for e in entries)
+    risk_dist = {"HIGH": 0, "MODERATE": 0, "LOW": 0, "NONE": 0}
+    for e in entries:
+        risk_dist[e.get("greenwashing_risk", "NONE")] = risk_dist.get(e.get("greenwashing_risk", "NONE"), 0) + 1
+    score_hex = "#00FF41" if avg_score >= 80 else "#FFBF00" if avg_score >= 60 else "#FF0000"
+
+    kpi = Table([[
+        [Paragraph("<font color='#808080'>// AUDITS ON RECORD</font>", label),
+         Paragraph(f"<font color='#E8E8E8'>{n:03d}</font>", ParagraphStyle("v", fontName="Courier-Bold", fontSize=22, textColor=TEXT, leading=26))],
+        [Paragraph("<font color='#808080'>// AVG COMPLIANCE</font>", label),
+         Paragraph(f"<font color='{score_hex}'>{avg_score}/100</font>", ParagraphStyle("v2", fontName="Courier-Bold", fontSize=22, leading=26))],
+        [Paragraph("<font color='#808080'>// TOTAL VALUE-AT-STAKE</font>", label),
+         Paragraph(f"<font color='#FF0000'>€ {total_vas:,.0f}</font>", ParagraphStyle("v3", fontName="Courier-Bold", fontSize=22, leading=26))],
+        [Paragraph("<font color='#808080'>// CRITICAL FINDINGS</font>", label),
+         Paragraph(f"<font color='#FFBF00'>{total_crit}</font>", ParagraphStyle("v4", fontName="Courier-Bold", fontSize=22, leading=26))],
+    ]], colWidths=[44.5 * mm] * 4)
+    kpi.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.5, WHITE),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, WHITE),
+        ("BACKGROUND", (0, 0), (-1, -1), BLACK),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10), ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+        ("TOPPADDING", (0, 0), (-1, -1), 10), ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+    ]))
+    story.append(kpi)
+    story.append(Spacer(1, 6 * mm))
+
+    # Risk breakdown
+    risk_rows = [[
+        Paragraph("<font color='#808080'>// GREENWASHING RISK DISTRIBUTION</font>", label),
+    ]]
+    risk_tbl_hdr = Table(risk_rows, colWidths=[178 * mm])
+    risk_tbl_hdr.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.5, WHITE),
+        ("BACKGROUND", (0, 0), (-1, -1), BLACK),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10), ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    story.append(risk_tbl_hdr)
+    risk_body = Table([[
+        Paragraph(f"<font color='#FF0000'>{risk_dist['HIGH']}</font>", ParagraphStyle("rh", fontName="Courier-Bold", fontSize=20, leading=24, alignment=1)),
+        Paragraph(f"<font color='#FFBF00'>{risk_dist['MODERATE']}</font>", ParagraphStyle("rm", fontName="Courier-Bold", fontSize=20, leading=24, alignment=1)),
+        Paragraph(f"<font color='#00FF41'>{risk_dist['LOW']}</font>", ParagraphStyle("rl", fontName="Courier-Bold", fontSize=20, leading=24, alignment=1)),
+        Paragraph(f"<font color='#808080'>{risk_dist['NONE']}</font>", ParagraphStyle("rn", fontName="Courier-Bold", fontSize=20, leading=24, alignment=1)),
+    ], [
+        Paragraph("<font color='#808080'>HIGH</font>", ParagraphStyle("l1", fontName="Courier", fontSize=7, leading=10, alignment=1, letterSpacing=1.5)),
+        Paragraph("<font color='#808080'>MODERATE</font>", ParagraphStyle("l2", fontName="Courier", fontSize=7, leading=10, alignment=1, letterSpacing=1.5)),
+        Paragraph("<font color='#808080'>LOW</font>", ParagraphStyle("l3", fontName="Courier", fontSize=7, leading=10, alignment=1, letterSpacing=1.5)),
+        Paragraph("<font color='#808080'>NONE</font>", ParagraphStyle("l4", fontName="Courier", fontSize=7, leading=10, alignment=1, letterSpacing=1.5)),
+    ]], colWidths=[44.5 * mm] * 4)
+    risk_body.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.5, WHITE),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, WHITE),
+        ("BACKGROUND", (0, 0), (-1, -1), BLACK),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 10), ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+    ]))
+    story.append(risk_body)
+
+    story.append(PageBreak())
+
+    # ---------- PAGE 2 · MASTER EVIDENCE TABLE ----------
+    story.append(Paragraph("<font color='#808080'>// MASTER EVIDENCE TABLE</font>", label))
+    story.append(Spacer(1, 3 * mm))
+    story.append(Paragraph(f"Ledger of Record · FY{year}", ParagraphStyle("h", fontName="Helvetica-Bold", fontSize=16, textColor=TEXT, leading=20)))
+    story.append(Spacer(1, 5 * mm))
+
+    header = ["#", "AUDIT ID", "CLIENT", "DATE", "SCORE", "RISK", "COMPOSITE HASH (SHA-256)"]
+    data = [header]
+    for i, e in enumerate(entries, 1):
+        h16 = (e["composite_hash"] or "")[:32] + "…" if e["composite_hash"] else "—"
+        data.append([
+            f"{i:03d}",
+            e["audit_id"][:14],
+            e["client_name"][:22],
+            (e["created_at"] or "")[:10],
+            f"{e['compliance_score'] if e['compliance_score'] is not None else '—'}",
+            (e["greenwashing_risk"] or "—")[:4],
+            h16,
+        ])
+    if not entries:
+        data.append(["—", "—", "no completed audits on record for this year", "—", "—", "—", "—"])
+
+    tbl = Table(data, colWidths=[10 * mm, 30 * mm, 40 * mm, 22 * mm, 14 * mm, 12 * mm, 50 * mm])
+    style = [
+        ("BOX", (0, 0), (-1, -1), 0.5, WHITE),
+        ("INNERGRID", (0, 0), (-1, -1), 0.5, WHITE),
+        ("BACKGROUND", (0, 0), (-1, -1), BLACK),
+        ("TEXTCOLOR", (0, 0), (-1, 0), SECONDARY),
+        ("TEXTCOLOR", (0, 1), (-1, -1), TEXT),
+        ("FONTNAME", (0, 0), (-1, 0), "Courier-Bold"),
+        ("FONTNAME", (0, 1), (-1, -1), "Courier"),
+        ("FONTSIZE", (0, 0), (-1, -1), 7),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+    ]
+    # Color-code score and risk columns per row
+    for i, e in enumerate(entries, 1):
+        s = e["compliance_score"] or 0
+        sc = colors.HexColor("#00FF41") if s >= 80 else colors.HexColor("#FFBF00") if s >= 60 else colors.HexColor("#FF0000")
+        rc = {"HIGH": colors.HexColor("#FF0000"), "MODERATE": colors.HexColor("#FFBF00"), "LOW": colors.HexColor("#00FF41"), "NONE": SECONDARY}.get(e["greenwashing_risk"], SECONDARY)
+        style += [("TEXTCOLOR", (4, i), (4, i), sc), ("TEXTCOLOR", (5, i), (5, i), rc), ("TEXTCOLOR", (6, i), (6, i), colors.HexColor("#00FF41"))]
+    tbl.setStyle(TableStyle(style))
+    story.append(tbl)
+
+    # Certification block
+    story.append(Spacer(1, 8 * mm))
+    cert = Table([
+        [Paragraph("<font color='#808080'>// CERTIFICATION OF INTEGRITY</font>", label)],
+        [Paragraph(
+            f"This Snapshot certifies that <b>{n}</b> audits recorded in the workspace for reporting year <b>FY{year}</b> "
+            f"were executed by AuditEngine v1.0 (anthropic:claude-sonnet-4-5-20250929) and their evidence chains are "
+            f"provable via the SHA-256 fingerprints listed above. The Master Merkle Root below binds all audit hashes "
+            f"into a single tamper-evident commitment.",
+            ParagraphStyle("cert", fontName="Helvetica", fontSize=9, textColor=TEXT, leading=13),
+        )],
+        [Paragraph(f"<font color='#00FF41' name='Courier-Bold'>MASTER MERKLE ROOT: {merkle_root}</font>",
+            ParagraphStyle("mmr", fontName="Courier-Bold", fontSize=8, textColor=COMPLIANT, leading=12))],
+    ], colWidths=[178 * mm])
+    cert.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.5, WHITE),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.5, WHITE),
+        ("LINEABOVE", (0, 2), (-1, 2), 0.5, WHITE),
+        ("BACKGROUND", (0, 0), (-1, -1), BLACK),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10), ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+        ("TOPPADDING", (0, 0), (-1, -1), 8), ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    story.append(cert)
+
+    def _bg(canvas, doc):
+        canvas.saveState()
+        canvas.setFillColor(BLACK)
+        canvas.rect(0, 0, doc.pagesize[0], doc.pagesize[1], fill=1, stroke=0)
+        canvas.setFillColor(SECONDARY)
+        canvas.setFont("Courier", 6.5)
+        canvas.drawString(16 * mm, 10 * mm, f"AUDITENGINE // STATUTORY SNAPSHOT // FY{year}")
+        canvas.drawRightString(doc.pagesize[0] - 16 * mm, 10 * mm, f"PAGE {doc.page:02d}")
+        canvas.setFillColor(colors.HexColor("#00FF41"))
+        canvas.drawString(16 * mm, 6 * mm, f"MASTER MERKLE ROOT: {merkle_root}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=_bg, onLaterPages=_bg)
+    return buf.getvalue()
+
