@@ -67,7 +67,10 @@ export default function Login() {
 
       <footer className="ae-border-strong border-t px-8 py-3 mono text-[10px] text-[#808080] flex justify-between">
         <div>© AUDITENGINE</div>
-        <div>SYSTEM STATUS: <span className="text-[#00FF41]">OPERATIONAL</span></div>
+        <div className="flex items-center gap-6">
+          <a href="/verify" data-testid="public-verify-link" className="text-[#808080] hover:text-[#00FF41]">⧉ PUBLIC VERIFY</a>
+          <div>SYSTEM STATUS: <span className="text-[#00FF41]">OPERATIONAL</span></div>
+        </div>
       </footer>
     </div>
   );

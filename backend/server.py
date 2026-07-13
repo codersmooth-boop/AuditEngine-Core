@@ -531,12 +531,45 @@ async def ledger_snapshot(year: int, user: dict = Depends(get_current_user)):
             "composite_hash": composite,
         })
     merkle_root = _hl.sha256(("|".join(e["composite_hash"] for e in entries)).encode()).hexdigest() if entries else _hl.sha256(b"").hexdigest()
+
+    # Persist trust-anchor for public verification (idempotent by merkle_root).
+    workspace_hash = _hl.sha256(user["user_id"].encode()).hexdigest()
+    generated_at = datetime.now(timezone.utc).isoformat()
+    await db.snapshots.update_one(
+        {"merkle_root": merkle_root},
+        {"$set": {
+            "merkle_root": merkle_root,
+            "workspace_id_hashed": workspace_hash,
+            "audit_count": len(entries),
+            "reporting_year": year,
+            "generated_at": generated_at,
+        }},
+        upsert=True,
+    )
+
     pdf_bytes = build_snapshot_pdf(entries, year, merkle_root, workspace_email=user.get("email", ""))
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="AuditEngine_Snapshot_FY{year}.pdf"'},
     )
+
+
+@api_router.get("/public/verify/{merkle_root}")
+async def public_verify(merkle_root: str):
+    # No auth. Returns integrity confirmation only — no PII, no audit details.
+    if not merkle_root or len(merkle_root) != 64 or any(c not in "0123456789abcdef" for c in merkle_root.lower()):
+        return JSONResponse(status_code=400, content={"status": "INVALID_ROOT"})
+    snap = await db.snapshots.find_one({"merkle_root": merkle_root.lower()}, {"_id": 0})
+    if not snap:
+        return JSONResponse(status_code=404, content={"status": "NOT_FOUND"})
+    return {
+        "status": "VERIFIED",
+        "workspace_id_hashed": snap["workspace_id_hashed"],
+        "audit_count": snap["audit_count"],
+        "reporting_year": snap.get("reporting_year"),
+        "timestamp": snap["generated_at"],
+    }
 
 
 app.include_router(api_router)

@@ -6,6 +6,7 @@ import Login from "@/pages/Login";
 import Dashboard from "@/pages/Dashboard";
 import AuditView from "@/pages/AuditView";
 import Ledger from "@/pages/Ledger";
+import Verify from "@/pages/Verify";
 import AuthCallback from "@/pages/AuthCallback";
 
 function Protected({ children }) {
@@ -21,6 +22,7 @@ function RouterShell() {
   return (
     <Routes>
       <Route path="/" element={<Login />} />
+      <Route path="/verify" element={<Verify />} />
       <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
       <Route path="/ledger" element={<Protected><Ledger /></Protected>} />
       <Route path="/audits/:id" element={<Protected><AuditView /></Protected>} />
