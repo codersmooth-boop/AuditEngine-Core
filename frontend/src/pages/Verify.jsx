@@ -136,6 +136,16 @@ export default function Verify() {
                     </p>
                     <div className="mono text-[10px] text-[#00FF41] mt-4 break-all">MERKLE ROOT: {root.trim().toLowerCase()}</div>
                   </div>
+                  <div className="ae-border-strong border-t px-6 py-4">
+                    <button
+                      data-testid="verify-view-all-btn"
+                      onClick={() => nav(`/registry?workspace=${data.workspace_id_hashed}`)}
+                      className="w-full mono text-xs tracking-[0.2em] px-6 py-4 bg-black text-[#E8E8E8] hover:bg-[#0D0D0D] hover:text-[#00FF41] transition-colors text-left flex items-center justify-between"
+                    >
+                      <span>→ VIEW ALL ATTESTATIONS BY THIS WORKSPACE</span>
+                      <span className="text-[#00FF41]">⧉</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

@@ -9,6 +9,10 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone, timedelta
 import httpx
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from llm_service import analyze_documents
 from pdf_service import build_audit_pdf, build_board_brief_pdf, build_snapshot_pdf
@@ -23,6 +27,23 @@ db = client[os.environ['DB_NAME']]
 
 app = FastAPI(title="AuditEngine")
 api_router = APIRouter(prefix="/api")
+
+def _client_ip(request: Request) -> str:
+    """Extract the real client IP, respecting X-Forwarded-For / X-Real-IP from the ingress."""
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    xri = request.headers.get("x-real-ip")
+    if xri:
+        return xri.strip()
+    return get_remote_address(request)
+
+
+# Rate limiter for public endpoints (60 req/min/IP).
+limiter = Limiter(key_func=_client_ip, default_limits=[])
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("auditengine")
@@ -566,11 +587,22 @@ async def _compute_and_persist_snapshot(user_id: str, user_email: str, year: int
             "critical_findings_count": a.get("critical_findings_count") or 0,
             "greenwashing_risk": a.get("greenwashing_risk", "NONE"), "composite_hash": composite,
         })
-    merkle_root = _hl.sha256(("|".join(e["composite_hash"] for e in entries)).encode()).hexdigest() if entries else _hl.sha256(b"").hexdigest()
+    # P1 · Gap 1.2 — reject empty ledgers.
+    if not entries:
+        raise HTTPException(status_code=400, detail="Cannot attest to an empty ledger.")
+
+    merkle_root = _hl.sha256(("|".join(e["composite_hash"] for e in entries)).encode()).hexdigest()
     workspace_hash = _hl.sha256(user_id.encode()).hexdigest()
     generated_at = datetime.now(timezone.utc).isoformat()
+
+    # P0 · Gap 2.1 — reject spoof: same merkle_root claimed by a different workspace.
+    existing = await db.snapshots.find_one({"merkle_root": merkle_root}, {"_id": 0, "workspace_id_hashed": 1})
+    if existing and existing.get("workspace_id_hashed") != workspace_hash:
+        raise HTTPException(status_code=409, detail="Merkle root already registered under a different workspace.")
+
+    # P1 · Gap 1.3 — upsert keyed on (workspace, year): most recent root for that year wins.
     await db.snapshots.update_one(
-        {"merkle_root": merkle_root},
+        {"workspace_id_hashed": workspace_hash, "reporting_year": year},
         {"$set": {"merkle_root": merkle_root, "workspace_id_hashed": workspace_hash,
                   "audit_count": len(entries), "reporting_year": year, "generated_at": generated_at}},
         upsert=True,
@@ -604,7 +636,8 @@ async def ledger_snapshot_meta(year: int, user: dict = Depends(get_current_user)
 
 
 @api_router.get("/public/badge/{merkle_root}.svg")
-async def public_badge_svg(merkle_root: str):
+@limiter.limit("60/minute")
+async def public_badge_svg(request: Request, merkle_root: str):
     """Return a static SVG attestation badge. Public, no auth."""
     root = (merkle_root or "").lower()
     if not (len(root) == 64 and all(c in "0123456789abcdef" for c in root)):
@@ -637,7 +670,8 @@ async def public_badge_svg(merkle_root: str):
 
 
 @api_router.get("/public/registry")
-async def public_registry(page: int = 1, limit: int = 50, workspace: Optional[str] = None):
+@limiter.limit("60/minute")
+async def public_registry(request: Request, page: int = 1, limit: int = 50, workspace: Optional[str] = None):
     """Public transparency log. Zero PII: only mathematical roots + timestamps."""
     page = max(1, page)
     limit = max(1, min(200, limit))
@@ -689,7 +723,8 @@ async def my_streak(user: dict = Depends(get_current_user)):
 
 
 @api_router.get("/public/leaderboard")
-async def public_leaderboard(limit: int = 100):
+@limiter.limit("60/minute")
+async def public_leaderboard(request: Request, limit: int = 100):
     """Public, opt-in only. Cached (60s TTL). Zero PII: only workspace hashes + counts."""
     import time as _t
     now = _t.time()
@@ -749,7 +784,8 @@ async def public_leaderboard(limit: int = 100):
 
 
 @api_router.get("/public/verify/{merkle_root}")
-async def public_verify(merkle_root: str):
+@limiter.limit("60/minute")
+async def public_verify(request: Request, merkle_root: str):
     # No auth. Returns integrity confirmation only — no PII, no audit details.
     if not merkle_root or len(merkle_root) != 64 or any(c not in "0123456789abcdef" for c in merkle_root.lower()):
         return JSONResponse(status_code=400, content={"status": "INVALID_ROOT"})
@@ -774,6 +810,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def _create_indexes():
+    """Idempotent index creation for hot paths."""
+    try:
+        await db.snapshots.create_index("merkle_root", unique=True)
+        await db.snapshots.create_index([("workspace_id_hashed", 1), ("reporting_year", 1)])
+        await db.snapshots.create_index([("generated_at", -1)])
+        await db.users.create_index("leaderboard_opt_in")
+        await db.users.create_index("user_id", unique=True)
+        await db.users.create_index("email")
+        await db.audits.create_index([("user_id", 1), ("reporting_year", 1), ("status", 1)])
+        await db.audits.create_index("audit_id", unique=True)
+        await db.user_sessions.create_index("session_token", unique=True)
+        logger.info("Indexes ensured on hot-path collections")
+    except Exception as e:
+        logger.warning(f"Index creation warning (may pre-exist): {e}")
 
 
 @app.on_event("shutdown")
