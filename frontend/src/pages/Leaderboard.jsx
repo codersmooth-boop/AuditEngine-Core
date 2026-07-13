@@ -52,8 +52,9 @@ export default function Leaderboard() {
 
             <div className="grid grid-cols-12 mono text-[10px] tracking-widest text-[#808080] px-6 py-3 border-b-[0.5px] border-[#2A2A2A]">
               <div className="col-span-1">RANK</div>
-              <div className="col-span-6">WORKSPACE HASH</div>
+              <div className="col-span-5">WORKSPACE HASH</div>
               <div className="col-span-2 text-right pr-6">TOTAL AUDITS</div>
+              <div className="col-span-1">STREAK</div>
               <div className="col-span-3 pl-2">LAST ATTESTATION (UTC)</div>
             </div>
 
@@ -76,7 +77,7 @@ export default function Leaderboard() {
                 <div className="col-span-1 mono text-2xl" style={{ color: rankTone(e.rank) }}>
                   {String(e.rank).padStart(3, "0")}
                 </div>
-                <div className="col-span-6">
+                <div className="col-span-5">
                   <div className="text-[#00FF41] tracking-wider">
                     <span className="text-[#808080]">→ </span>{trunc(e.workspace_id_hashed)}
                   </div>
@@ -86,6 +87,13 @@ export default function Leaderboard() {
                 </div>
                 <div className="col-span-2 text-right pr-6 text-[#00FF41] font-bold text-lg">
                   {String(e.total_audits).padStart(4, "0")}
+                </div>
+                <div className="col-span-1" data-testid={`leaderboard-streak-${e.rank}`}>
+                  {e.current_streak > 0 ? (
+                    <span className="mono text-base" style={{ color: "#FFD700" }}>★ {String(e.current_streak).padStart(2, "0")}</span>
+                  ) : (
+                    <span className="mono text-[10px] text-[#808080]">—</span>
+                  )}
                 </div>
                 <div className="col-span-3 pl-2 text-[#808080]">{e.last_attestation_date}</div>
               </button>

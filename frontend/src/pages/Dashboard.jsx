@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
-import { listAudits, deleteAudit, setLeaderboardOptIn } from "../lib/api";
+import { listAudits, deleteAudit, setLeaderboardOptIn, api } from "../lib/api";
 import NewAuditDrawer from "../components/NewAuditDrawer";
 import UtcClock from "../components/UtcClock";
 
@@ -11,11 +11,15 @@ export default function Dashboard() {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [optSaving, setOptSaving] = useState(false);
+  const [streak, setStreak] = useState(null);
   const nav = useNavigate();
 
   const load = async () => {
     setLoading(true);
-    try { setAudits(await listAudits()); } finally { setLoading(false); }
+    try {
+      setAudits(await listAudits());
+      try { const r = await api.get("/settings/streak"); setStreak(r.data); } catch { /* ignore */ }
+    } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
 
@@ -91,6 +95,43 @@ export default function Dashboard() {
           </button>
         </div>
       </div>
+
+      {/* STREAK STATUS PANEL */}
+      {streak && (
+        <div className="ae-border-strong border-b px-8 py-5 grid grid-cols-3 gap-0" data-testid="streak-status-panel">
+          <div className="border-r-[0.5px] border-[#2A2A2A] pr-6">
+            <div className="mono text-[10px] tracking-widest text-[#808080]">// TRUST STREAK</div>
+            <div className="flex items-baseline gap-3 mt-2">
+              <span className="mono text-4xl" style={{ color: streak.current_streak > 0 ? "#FFD700" : "#808080" }}>
+                ★ {String(streak.current_streak).padStart(2, "0")}
+              </span>
+              <span className="mono text-xs text-[#808080]">YEAR{streak.current_streak === 1 ? "" : "S"}</span>
+            </div>
+          </div>
+          <div className="border-r-[0.5px] border-[#2A2A2A] px-6">
+            <div className="mono text-[10px] tracking-widest text-[#808080]">// LAST ATTESTED</div>
+            <div className="mono text-3xl text-[#E8E8E8] mt-2">{streak.last_streak_year ?? "—"}</div>
+          </div>
+          <div className="pl-6" data-testid="streak-status-text">
+            <div className="mono text-[10px] tracking-widest text-[#808080]">// STATUS</div>
+            {streak.current_streak === 0 && (
+              <div className="mono text-sm text-[#E8E8E8] mt-2">
+                No streak yet. Publish your first FY{streak.current_year - 1} snapshot to start.
+              </div>
+            )}
+            {streak.current_streak > 0 && !streak.at_risk && (
+              <div className="mono text-sm mt-2" style={{ color: "#00FF41" }}>
+                CURRENT STREAK: ★ {String(streak.current_streak).padStart(2, "0")} YEAR{streak.current_streak === 1 ? "" : "S"}. Next attestation due: FY{streak.next_due_year}.
+              </div>
+            )}
+            {streak.current_streak > 0 && streak.at_risk && (
+              <div className="mono text-sm mt-2" style={{ color: "#FFBF00" }}>
+                STREAK AT RISK. Publish FY{streak.current_year - 1} snapshot to maintain your rank.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="px-8 py-6">
         <div className="grid grid-cols-12 mono text-[10px] text-[#808080] tracking-widest py-3 border-b-[0.5px] border-[#2A2A2A]">

@@ -528,6 +528,28 @@ async def download_audit_log(audit_id: str, user: dict = Depends(get_current_use
     )
 
 
+async def _calculate_trust_streak(user_id: str) -> Dict[str, Any]:
+    """Count consecutive reporting years with a persisted snapshot, starting from the most recent."""
+    import hashlib as _hl
+    workspace_hash = _hl.sha256(user_id.encode()).hexdigest()
+    years = await db.snapshots.distinct("reporting_year", {"workspace_id_hashed": workspace_hash})
+    years = sorted([y for y in years if isinstance(y, int)], reverse=True)
+    if not years:
+        return {"current_streak": 0, "last_streak_year": None, "next_due_year": None}
+    streak = 1
+    for prev in years[1:]:
+        if prev == years[0] - streak:
+            streak += 1
+        else:
+            break
+    last_year = years[0]
+    return {
+        "current_streak": streak,
+        "last_streak_year": last_year,
+        "next_due_year": last_year + 1,
+    }
+
+
 async def _compute_and_persist_snapshot(user_id: str, user_email: str, year: int):
     """Compute merkle root for a user+year, persist to snapshots collection. Returns entries + meta."""
     import hashlib as _hl
@@ -553,6 +575,13 @@ async def _compute_and_persist_snapshot(user_id: str, user_email: str, year: int
                   "audit_count": len(entries), "reporting_year": year, "generated_at": generated_at}},
         upsert=True,
     )
+    # Recompute and persist streak on the workspace (user) doc.
+    streak = await _calculate_trust_streak(user_id)
+    await db.users.update_one({"user_id": user_id}, {"$set": {
+        "current_streak": streak["current_streak"],
+        "last_streak_year": streak["last_streak_year"],
+    }})
+    _LB_CACHE["expires"] = 0  # streak changed → invalidate leaderboard cache
     return entries, merkle_root, generated_at
 
 
@@ -624,11 +653,39 @@ async def public_registry(page: int = 1, limit: int = 50, workspace: Optional[st
         {"_id": 0, "merkle_root": 1, "reporting_year": 1, "audit_count": 1, "generated_at": 1},
     ).sort("generated_at", -1).skip(skip).limit(limit)
     entries = await cursor.to_list(limit)
+
+    workspace_streak = None
+    if workspace:
+        # Look up streak for opted-in workspaces only; else return None.
+        import hashlib as _hl
+        candidates = await db.users.find(
+            {"leaderboard_opt_in": True},
+            {"_id": 0, "user_id": 1, "current_streak": 1, "last_streak_year": 1},
+        ).to_list(2000)
+        for u in candidates:
+            if _hl.sha256(u["user_id"].encode()).hexdigest() == workspace.lower():
+                workspace_streak = {
+                    "current_streak": u.get("current_streak") or 0,
+                    "last_streak_year": u.get("last_streak_year"),
+                }
+                break
+
     return {
         "page": page, "limit": limit, "total": total,
         "has_next": skip + len(entries) < total, "entries": entries,
         "workspace_filter": workspace.lower() if workspace else None,
+        "workspace_streak": workspace_streak,
     }
+
+
+@api_router.get("/settings/streak")
+async def my_streak(user: dict = Depends(get_current_user)):
+    """Live streak status for the authenticated workspace + due-date signal."""
+    streak = await _calculate_trust_streak(user["user_id"])
+    now_year = datetime.now(timezone.utc).year
+    last_year = streak["last_streak_year"]
+    at_risk = bool(last_year is not None and now_year > last_year)
+    return {**streak, "current_year": now_year, "at_risk": at_risk}
 
 
 @api_router.get("/public/leaderboard")
@@ -640,10 +697,20 @@ async def public_leaderboard(limit: int = 100):
         return _LB_CACHE["data"]
 
     limit = max(1, min(500, limit))
-    # Set of opted-in workspace_id_hashed
-    opted_in_users = await db.users.find({"leaderboard_opt_in": True}, {"_id": 0, "user_id": 1}).to_list(2000)
+    # Set of opted-in workspace_id_hashed + their streak from user docs
+    opted_in_users = await db.users.find(
+        {"leaderboard_opt_in": True},
+        {"_id": 0, "user_id": 1, "current_streak": 1, "last_streak_year": 1},
+    ).to_list(2000)
     import hashlib as _hl
-    allowed = {_hl.sha256(u["user_id"].encode()).hexdigest() for u in opted_in_users}
+    hash_to_streak: Dict[str, Dict[str, Any]] = {}
+    for u in opted_in_users:
+        h = _hl.sha256(u["user_id"].encode()).hexdigest()
+        hash_to_streak[h] = {
+            "current_streak": u.get("current_streak") or 0,
+            "last_streak_year": u.get("last_streak_year"),
+        }
+    allowed = set(hash_to_streak.keys())
 
     if not allowed:
         payload = {"total_workspaces": 0, "entries": [], "cached_at": datetime.now(timezone.utc).isoformat()}
@@ -659,21 +726,23 @@ async def public_leaderboard(limit: int = 100):
             "last_attestation_date": {"$max": "$generated_at"},
             "first_attestation_date": {"$min": "$generated_at"},
         }},
-        {"$sort": {"total_audits": -1, "last_attestation_date": -1}},
-        {"$limit": limit},
     ]
-    agg = await db.snapshots.aggregate(pipeline).to_list(limit)
-    entries = [
-        {
-            "rank": i + 1,
+    agg = await db.snapshots.aggregate(pipeline).to_list(len(allowed))
+    # Merge streak, then sort by (total_audits DESC, streak DESC, last_attestation DESC)
+    merged = []
+    for row in agg:
+        s = hash_to_streak.get(row["_id"], {})
+        merged.append({
             "workspace_id_hashed": row["_id"],
             "total_audits": row["total_audits"],
             "snapshot_count": row["snapshot_count"],
             "last_attestation_date": row["last_attestation_date"],
             "first_attestation_date": row["first_attestation_date"],
-        }
-        for i, row in enumerate(agg)
-    ]
+            "current_streak": s.get("current_streak", 0),
+            "last_streak_year": s.get("last_streak_year"),
+        })
+    merged.sort(key=lambda r: (r["total_audits"], r["current_streak"], r["last_attestation_date"] or ""), reverse=True)
+    entries = [{"rank": i + 1, **row} for i, row in enumerate(merged[:limit])]
     payload = {"total_workspaces": len(entries), "entries": entries, "cached_at": datetime.now(timezone.utc).isoformat()}
     _LB_CACHE.update({"data": payload, "expires": now + _LB_TTL_SECONDS})
     return payload

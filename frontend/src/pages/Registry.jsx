@@ -53,12 +53,28 @@ export default function Registry() {
               <div>
                 <div className="mono text-[10px] tracking-[0.3em] text-[#00FF41]">// FILTERED · SINGLE WORKSPACE</div>
                 <div className="mono text-xs text-[#E8E8E8] mt-2 break-all">{workspace}</div>
+                {data.workspace_streak && data.workspace_streak.current_streak > 0 && (
+                  <div className="mono text-sm mt-3" style={{ color: "#FFD700" }} data-testid="registry-workspace-streak">
+                    ★ {String(data.workspace_streak.current_streak).padStart(2, "0")}-YEAR VERIFIED STREAK
+                  </div>
+                )}
               </div>
               <button
                 onClick={() => nav("/registry")}
                 className="mono text-[10px] tracking-widest text-[#808080] hover:text-[#FF0000]"
                 data-testid="registry-clear-filter"
               >CLEAR FILTER ✕</button>
+            </div>
+          )}
+
+          {workspace && data.workspace_streak && data.workspace_streak.current_streak > 0 && (
+            <div className="ae-border-strong px-6 py-4 mb-6" data-testid="registry-streak-statement">
+              <div className="mono text-[10px] tracking-[0.3em] text-[#808080] mb-2">// NON-REPUDIATION</div>
+              <p className="sans text-sm text-[#E8E8E8] leading-relaxed">
+                This workspace has maintained a verified chain of integrity for{" "}
+                <span className="mono" style={{ color: "#FFD700" }}>{data.workspace_streak.current_streak}</span>{" "}
+                consecutive year{data.workspace_streak.current_streak === 1 ? "" : "s"}.
+              </p>
             </div>
           )}
 
