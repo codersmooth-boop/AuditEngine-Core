@@ -4,6 +4,7 @@ import { listAudits, snapshotUrl } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import UtcClock from "../components/UtcClock";
 import VerifierModal from "../components/VerifierModal";
+import BadgeModal from "../components/BadgeModal";
 
 // SHA-256 helper for composite fingerprint (browser-side, deterministic)
 async function composite(hashes) {
@@ -25,6 +26,7 @@ export default function Ledger() {
   const [fullHashes, setFullHashes] = useState({});
   const [loading, setLoading] = useState(true);
   const [verifying, setVerifying] = useState(null);
+  const [showBadge, setShowBadge] = useState(false);
   const currentYear = new Date().getUTCFullYear();
   const [year, setYear] = useState(currentYear - 1);
 
@@ -103,6 +105,11 @@ export default function Ledger() {
             target="_blank" rel="noreferrer"
             className="mono text-xs tracking-[0.2em] ae-border-strong px-6 py-3 bg-[#00FF41] text-black hover:bg-white transition-colors"
           >⧉ GENERATE YEARLY SNAPSHOT</a>
+          <button
+            data-testid="badge-btn"
+            onClick={() => setShowBadge(true)}
+            className="mono text-xs tracking-[0.2em] ae-border-strong px-6 py-3 bg-black text-[#E8E8E8] hover:bg-[#0D0D0D] transition-colors"
+          >⧉ ATTESTATION BADGE</button>
           <input
             data-testid="ledger-search"
             value={q}
@@ -163,6 +170,9 @@ export default function Ledger() {
           expectedHash={fullHashes[verifying.audit_id]}
           onClose={() => setVerifying(null)}
         />
+      )}
+      {showBadge && (
+        <BadgeModal year={year} onClose={() => setShowBadge(false)} />
       )}
     </div>
   );

@@ -509,49 +509,82 @@ async def download_audit_log(audit_id: str, user: dict = Depends(get_current_use
     )
 
 
-@api_router.get("/ledger/snapshot")
-async def ledger_snapshot(year: int, user: dict = Depends(get_current_user)):
+async def _compute_and_persist_snapshot(user_id: str, user_email: str, year: int):
+    """Compute merkle root for a user+year, persist to snapshots collection. Returns entries + meta."""
     import hashlib as _hl
-    docs = await db.audits.find({"user_id": user["user_id"], "reporting_year": year, "status": "COMPLETE"}, {"_id": 0}).sort("created_at", 1).to_list(500)
+    docs = await db.audits.find({"user_id": user_id, "reporting_year": year, "status": "COMPLETE"}, {"_id": 0}).sort("created_at", 1).to_list(500)
     entries = []
     for a in docs:
         fh = a.get("file_hashes") or []
         composite = _hl.sha256(("|".join(x.get("sha256", "") for x in fh)).encode()).hexdigest() if fh else ""
         entries.append({
-            "audit_id": a.get("audit_id", ""),
-            "client_name": a.get("client_name", ""),
-            "nace_code": a.get("nace_code", ""),
-            "nace_name": a.get("nace_name", ""),
-            "created_at": a.get("created_at", ""),
-            "completed_at": a.get("completed_at", ""),
-            "compliance_score": a.get("compliance_score"),
-            "value_at_stake_eur": a.get("value_at_stake_eur") or 0,
+            "audit_id": a.get("audit_id", ""), "client_name": a.get("client_name", ""),
+            "nace_code": a.get("nace_code", ""), "nace_name": a.get("nace_name", ""),
+            "created_at": a.get("created_at", ""), "completed_at": a.get("completed_at", ""),
+            "compliance_score": a.get("compliance_score"), "value_at_stake_eur": a.get("value_at_stake_eur") or 0,
             "critical_findings_count": a.get("critical_findings_count") or 0,
-            "greenwashing_risk": a.get("greenwashing_risk", "NONE"),
-            "composite_hash": composite,
+            "greenwashing_risk": a.get("greenwashing_risk", "NONE"), "composite_hash": composite,
         })
     merkle_root = _hl.sha256(("|".join(e["composite_hash"] for e in entries)).encode()).hexdigest() if entries else _hl.sha256(b"").hexdigest()
-
-    # Persist trust-anchor for public verification (idempotent by merkle_root).
-    workspace_hash = _hl.sha256(user["user_id"].encode()).hexdigest()
+    workspace_hash = _hl.sha256(user_id.encode()).hexdigest()
     generated_at = datetime.now(timezone.utc).isoformat()
     await db.snapshots.update_one(
         {"merkle_root": merkle_root},
-        {"$set": {
-            "merkle_root": merkle_root,
-            "workspace_id_hashed": workspace_hash,
-            "audit_count": len(entries),
-            "reporting_year": year,
-            "generated_at": generated_at,
-        }},
+        {"$set": {"merkle_root": merkle_root, "workspace_id_hashed": workspace_hash,
+                  "audit_count": len(entries), "reporting_year": year, "generated_at": generated_at}},
         upsert=True,
     )
+    return entries, merkle_root, generated_at
 
+
+@api_router.get("/ledger/snapshot")
+async def ledger_snapshot(year: int, user: dict = Depends(get_current_user)):
+    entries, merkle_root, _ = await _compute_and_persist_snapshot(user["user_id"], user.get("email", ""), year)
     pdf_bytes = build_snapshot_pdf(entries, year, merkle_root, workspace_email=user.get("email", ""))
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="AuditEngine_Snapshot_FY{year}.pdf"'},
+    )
+
+
+@api_router.get("/ledger/snapshot-meta")
+async def ledger_snapshot_meta(year: int, user: dict = Depends(get_current_user)):
+    """Persist + return only the metadata (no PDF). Used by the badge generator."""
+    entries, merkle_root, generated_at = await _compute_and_persist_snapshot(user["user_id"], user.get("email", ""), year)
+    return {"merkle_root": merkle_root, "reporting_year": year, "audit_count": len(entries), "generated_at": generated_at}
+
+
+@api_router.get("/public/badge/{merkle_root}.svg")
+async def public_badge_svg(merkle_root: str):
+    """Return a static SVG attestation badge. Public, no auth."""
+    root = (merkle_root or "").lower()
+    if not (len(root) == 64 and all(c in "0123456789abcdef" for c in root)):
+        raise HTTPException(status_code=400, detail="Invalid merkle root")
+    snap = await db.snapshots.find_one({"merkle_root": root}, {"_id": 0})
+    year = snap.get("reporting_year") if snap else None
+    audit_count = snap.get("audit_count") if snap else None
+    short = f"{root[:8]}…{root[-8:]}"
+    year_line = f"FY{year} · {audit_count} AUDITS" if snap else "UNREGISTERED"
+    tick_color = "#00FF41" if snap else "#FF0000"
+    status_text = "VERIFIED BY AUDITENGINE" if snap else "UNVERIFIED"
+
+    # Static, dependency-free SVG. All colors hard-coded, monospace font-family for portability.
+    svg = f'''<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="280" height="88" viewBox="0 0 280 88" role="img" aria-label="Verified by AuditEngine">
+  <title>Verified by AuditEngine · {short}</title>
+  <rect x="0.25" y="0.25" width="279.5" height="87.5" fill="#000000" stroke="#FFFFFF" stroke-width="0.5"/>
+  <rect x="0.25" y="0.25" width="18" height="87.5" fill="#000000" stroke="#FFFFFF" stroke-width="0.5"/>
+  <text x="9.25" y="52" text-anchor="middle" font-family="'Courier New', ui-monospace, monospace" font-size="16" font-weight="700" fill="{tick_color}">✓</text>
+  <text x="28" y="24" font-family="'Courier New', ui-monospace, monospace" font-size="7.5" font-weight="700" fill="#808080" letter-spacing="1.6">// TRUST ANCHOR</text>
+  <text x="28" y="43" font-family="'Courier New', ui-monospace, monospace" font-size="11" font-weight="700" fill="{tick_color}" letter-spacing="0.6">{status_text}</text>
+  <text x="28" y="60" font-family="'Courier New', ui-monospace, monospace" font-size="8.5" font-weight="500" fill="#E8E8E8" letter-spacing="0.6">{short}</text>
+  <text x="28" y="74" font-family="'Courier New', ui-monospace, monospace" font-size="7.5" font-weight="500" fill="#808080" letter-spacing="1.2">{year_line}</text>
+</svg>'''
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "public, max-age=300"},
     )
 
 
