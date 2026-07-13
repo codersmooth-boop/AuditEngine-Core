@@ -555,6 +555,27 @@ async def ledger_snapshot(year: int, user: dict = Depends(get_current_user)):
     )
 
 
+@api_router.get("/public/registry")
+async def public_registry(page: int = 1, limit: int = 50):
+    """Public transparency log. Zero PII: only mathematical roots + timestamps."""
+    page = max(1, page)
+    limit = max(1, min(200, limit))
+    total = await db.snapshots.count_documents({})
+    skip = (page - 1) * limit
+    cursor = db.snapshots.find(
+        {},
+        {"_id": 0, "merkle_root": 1, "reporting_year": 1, "audit_count": 1, "generated_at": 1},
+    ).sort("generated_at", -1).skip(skip).limit(limit)
+    entries = await cursor.to_list(limit)
+    return {
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "has_next": skip + len(entries) < total,
+        "entries": entries,
+    }
+
+
 @api_router.get("/public/verify/{merkle_root}")
 async def public_verify(merkle_root: str):
     # No auth. Returns integrity confirmation only — no PII, no audit details.

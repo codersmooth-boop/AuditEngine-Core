@@ -1,15 +1,18 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 
 export default function Verify() {
+  const nav = useNavigate();
+  const [params] = useSearchParams();
   const [root, setRoot] = useState("");
   const [state, setState] = useState("idle"); // idle | loading | verified | not_found | invalid | error
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
 
-  const verify = async (e) => {
+  const verify = async (e, rootOverride) => {
     e?.preventDefault();
-    const cleaned = root.trim().toLowerCase();
+    const cleaned = (rootOverride ?? root).trim().toLowerCase();
     if (!/^[0-9a-f]{64}$/.test(cleaned)) {
       setState("invalid"); setError("Merkle Root must be a 64-character hexadecimal SHA-256 string.");
       return;
@@ -29,10 +32,26 @@ export default function Verify() {
 
   const reset = () => { setState("idle"); setData(null); setError(""); };
 
+  // Auto-verify when arriving via /verify?root=<hex>
+  useEffect(() => {
+    const r = params.get("root");
+    if (r && /^[0-9a-f]{64}$/i.test(r)) {
+      setRoot(r);
+      verify(null, r);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <div className="min-h-screen bg-black text-[#E8E8E8] flex flex-col">
       <header className="ae-border-strong border-b flex items-center justify-between px-8 py-4">
-        <div className="mono text-xs tracking-[0.2em]">AUDITENGINE // TRUST ANCHOR</div>
+        <div className="flex items-center gap-8">
+          <div className="mono text-xs tracking-[0.2em]">AUDITENGINE // TRUST ANCHOR</div>
+          <div className="flex gap-6">
+            <span className="mono text-[10px] tracking-widest text-[#00FF41]">⧉ VERIFY ROOT</span>
+            <button onClick={() => nav("/registry")} className="mono text-[10px] tracking-widest text-[#808080] hover:text-white">⧉ GLOBAL ROOT REGISTRY</button>
+          </div>
+        </div>
         <div className="mono text-[10px] tracking-widest text-[#808080]">PUBLIC VERIFICATION PORTAL</div>
       </header>
 

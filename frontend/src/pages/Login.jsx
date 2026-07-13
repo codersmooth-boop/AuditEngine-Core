@@ -69,6 +69,7 @@ export default function Login() {
         <div>© AUDITENGINE</div>
         <div className="flex items-center gap-6">
           <a href="/verify" data-testid="public-verify-link" className="text-[#808080] hover:text-[#00FF41]">⧉ PUBLIC VERIFY</a>
+          <a href="/registry" data-testid="public-registry-link" className="text-[#808080] hover:text-[#00FF41]">⧉ GLOBAL ROOT REGISTRY</a>
           <div>SYSTEM STATUS: <span className="text-[#00FF41]">OPERATIONAL</span></div>
         </div>
       </footer>
