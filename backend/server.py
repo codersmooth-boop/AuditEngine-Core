@@ -37,6 +37,10 @@ STREAM_QUEUES: Dict[str, List[asyncio.Queue]] = {}
 STREAM_HISTORY: Dict[str, List[dict]] = {}
 STREAM_MAX_HISTORY = 400
 
+# In-memory TTL cache for the public leaderboard (60s)
+_LB_CACHE: Dict[str, Any] = {"expires": 0, "data": None}
+_LB_TTL_SECONDS = 60
+
 
 def _stream_publish(audit_id: str, event: dict) -> None:
     from datetime import datetime, timezone as _tz
@@ -185,7 +189,22 @@ async def create_session(request: Request, response: Response):
 
 @api_router.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
-    return {"user_id": user["user_id"], "email": user["email"], "name": user["name"], "picture": user.get("picture")}
+    return {
+        "user_id": user["user_id"],
+        "email": user["email"],
+        "name": user["name"],
+        "picture": user.get("picture"),
+        "leaderboard_opt_in": bool(user.get("leaderboard_opt_in", False)),
+    }
+
+
+@api_router.patch("/settings/leaderboard")
+async def toggle_leaderboard(payload: dict, user: dict = Depends(get_current_user)):
+    """Explicit opt-in / opt-out for the public leaderboard. Default: false."""
+    opt_in = bool(payload.get("opt_in", False))
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"leaderboard_opt_in": opt_in}})
+    _LB_CACHE["expires"] = 0  # invalidate leaderboard cache
+    return {"leaderboard_opt_in": opt_in}
 
 
 @api_router.post("/auth/logout")
@@ -589,24 +608,75 @@ async def public_badge_svg(merkle_root: str):
 
 
 @api_router.get("/public/registry")
-async def public_registry(page: int = 1, limit: int = 50):
+async def public_registry(page: int = 1, limit: int = 50, workspace: Optional[str] = None):
     """Public transparency log. Zero PII: only mathematical roots + timestamps."""
     page = max(1, page)
     limit = max(1, min(200, limit))
-    total = await db.snapshots.count_documents({})
+    q: Dict[str, Any] = {}
+    if workspace:
+        if not (len(workspace) == 64 and all(c in "0123456789abcdef" for c in workspace.lower())):
+            raise HTTPException(status_code=400, detail="Invalid workspace hash")
+        q["workspace_id_hashed"] = workspace.lower()
+    total = await db.snapshots.count_documents(q)
     skip = (page - 1) * limit
     cursor = db.snapshots.find(
-        {},
+        q,
         {"_id": 0, "merkle_root": 1, "reporting_year": 1, "audit_count": 1, "generated_at": 1},
     ).sort("generated_at", -1).skip(skip).limit(limit)
     entries = await cursor.to_list(limit)
     return {
-        "page": page,
-        "limit": limit,
-        "total": total,
-        "has_next": skip + len(entries) < total,
-        "entries": entries,
+        "page": page, "limit": limit, "total": total,
+        "has_next": skip + len(entries) < total, "entries": entries,
+        "workspace_filter": workspace.lower() if workspace else None,
     }
+
+
+@api_router.get("/public/leaderboard")
+async def public_leaderboard(limit: int = 100):
+    """Public, opt-in only. Cached (60s TTL). Zero PII: only workspace hashes + counts."""
+    import time as _t
+    now = _t.time()
+    if _LB_CACHE.get("data") and _LB_CACHE.get("expires", 0) > now:
+        return _LB_CACHE["data"]
+
+    limit = max(1, min(500, limit))
+    # Set of opted-in workspace_id_hashed
+    opted_in_users = await db.users.find({"leaderboard_opt_in": True}, {"_id": 0, "user_id": 1}).to_list(2000)
+    import hashlib as _hl
+    allowed = {_hl.sha256(u["user_id"].encode()).hexdigest() for u in opted_in_users}
+
+    if not allowed:
+        payload = {"total_workspaces": 0, "entries": [], "cached_at": datetime.now(timezone.utc).isoformat()}
+        _LB_CACHE.update({"data": payload, "expires": now + _LB_TTL_SECONDS})
+        return payload
+
+    pipeline = [
+        {"$match": {"workspace_id_hashed": {"$in": list(allowed)}}},
+        {"$group": {
+            "_id": "$workspace_id_hashed",
+            "total_audits": {"$sum": "$audit_count"},
+            "snapshot_count": {"$sum": 1},
+            "last_attestation_date": {"$max": "$generated_at"},
+            "first_attestation_date": {"$min": "$generated_at"},
+        }},
+        {"$sort": {"total_audits": -1, "last_attestation_date": -1}},
+        {"$limit": limit},
+    ]
+    agg = await db.snapshots.aggregate(pipeline).to_list(limit)
+    entries = [
+        {
+            "rank": i + 1,
+            "workspace_id_hashed": row["_id"],
+            "total_audits": row["total_audits"],
+            "snapshot_count": row["snapshot_count"],
+            "last_attestation_date": row["last_attestation_date"],
+            "first_attestation_date": row["first_attestation_date"],
+        }
+        for i, row in enumerate(agg)
+    ]
+    payload = {"total_workspaces": len(entries), "entries": entries, "cached_at": datetime.now(timezone.utc).isoformat()}
+    _LB_CACHE.update({"data": payload, "expires": now + _LB_TTL_SECONDS})
+    return payload
 
 
 @api_router.get("/public/verify/{merkle_root}")

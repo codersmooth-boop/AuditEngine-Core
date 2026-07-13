@@ -50,6 +50,7 @@ export default function Verify() {
           <div className="flex gap-6">
             <span className="mono text-[10px] tracking-widest text-[#00FF41]">⧉ VERIFY ROOT</span>
             <button onClick={() => nav("/registry")} className="mono text-[10px] tracking-widest text-[#808080] hover:text-white">⧉ GLOBAL ROOT REGISTRY</button>
+            <button onClick={() => nav("/leaderboard")} className="mono text-[10px] tracking-widest text-[#808080] hover:text-white">⧉ LEADERBOARD</button>
           </div>
         </div>
         <div className="mono text-[10px] tracking-widest text-[#808080]">PUBLIC VERIFICATION PORTAL</div>

@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 
 export default function Registry() {
   const nav = useNavigate();
+  const [params] = useSearchParams();
+  const workspace = params.get("workspace") || "";
   const [page, setPage] = useState(1);
   const [limit] = useState(25);
   const [data, setData] = useState({ entries: [], total: 0, has_next: false });
@@ -11,11 +13,12 @@ export default function Registry() {
 
   useEffect(() => {
     setLoading(true);
-    api.get(`/public/registry?page=${page}&limit=${limit}`)
+    const wq = workspace ? `&workspace=${workspace}` : "";
+    api.get(`/public/registry?page=${page}&limit=${limit}${wq}`)
       .then(r => setData(r.data))
       .catch(() => setData({ entries: [], total: 0, has_next: false }))
       .finally(() => setLoading(false));
-  }, [page, limit]);
+  }, [page, limit, workspace]);
 
   const trunc = (h) => (h && h.length > 20 ? `${h.substr(0, 8)}…${h.substr(-8)}` : h || "—");
 
@@ -27,6 +30,7 @@ export default function Registry() {
           <div className="flex gap-6">
             <button onClick={() => nav("/verify")} className="mono text-[10px] tracking-widest text-[#808080] hover:text-white">⧉ VERIFY ROOT</button>
             <span className="mono text-[10px] tracking-widest text-[#00FF41]">⧉ GLOBAL ROOT REGISTRY</span>
+            <button onClick={() => nav("/leaderboard")} className="mono text-[10px] tracking-widest text-[#808080] hover:text-white">⧉ LEADERBOARD</button>
           </div>
         </div>
         <div className="mono text-[10px] tracking-widest text-[#808080]">PUBLIC · READ-ONLY</div>
@@ -43,6 +47,20 @@ export default function Registry() {
             Once a root is published here, it is a permanent, cryptographically-frozen record
             that the audit existed at that specific point in time.
           </p>
+
+          {workspace && (
+            <div className="ae-border-strong px-6 py-4 mb-6 flex items-center justify-between" data-testid="registry-workspace-filter">
+              <div>
+                <div className="mono text-[10px] tracking-[0.3em] text-[#00FF41]">// FILTERED · SINGLE WORKSPACE</div>
+                <div className="mono text-xs text-[#E8E8E8] mt-2 break-all">{workspace}</div>
+              </div>
+              <button
+                onClick={() => nav("/registry")}
+                className="mono text-[10px] tracking-widest text-[#808080] hover:text-[#FF0000]"
+                data-testid="registry-clear-filter"
+              >CLEAR FILTER ✕</button>
+            </div>
+          )}
 
           <div className="ae-border-strong">
             <div className="ae-border-strong border-b px-6 py-4 flex items-center justify-between">

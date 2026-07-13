@@ -1,15 +1,16 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
-import { listAudits, deleteAudit } from "../lib/api";
+import { listAudits, deleteAudit, setLeaderboardOptIn } from "../lib/api";
 import NewAuditDrawer from "../components/NewAuditDrawer";
 import UtcClock from "../components/UtcClock";
 
 export default function Dashboard() {
-  const { user, logout } = useAuth();
+  const { user, logout, refresh } = useAuth();
   const [audits, setAudits] = useState([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [optSaving, setOptSaving] = useState(false);
   const nav = useNavigate();
 
   const load = async () => {
@@ -17,6 +18,15 @@ export default function Dashboard() {
     try { setAudits(await listAudits()); } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
+
+  const toggleOptIn = async () => {
+    if (optSaving) return;
+    setOptSaving(true);
+    try {
+      await setLeaderboardOptIn(!user?.leaderboard_opt_in);
+      await refresh();
+    } finally { setOptSaving(false); }
+  };
 
   const onCreated = (a) => {
     setOpen(false);
@@ -60,13 +70,26 @@ export default function Dashboard() {
           <h1 className="sans text-5xl font-light tracking-tight">Audit Workspace.</h1>
           <p className="mono text-xs text-[#808080] mt-3">{audits.length} audit{audits.length === 1 ? "" : "s"} on record</p>
         </div>
-        <button
-          data-testid="new-audit-btn"
-          onClick={() => setOpen(true)}
-          className="mono text-xs tracking-[0.2em] ae-border-strong px-8 py-4 bg-[#00FF41] text-black hover:bg-white transition-colors"
-        >
-          + NEW AUDIT
-        </button>
+        <div className="flex items-center gap-4">
+          <button
+            data-testid="leaderboard-opt-in-toggle"
+            onClick={toggleOptIn}
+            disabled={optSaving}
+            className={`ae-border-strong px-5 py-4 flex items-center gap-3 ${user?.leaderboard_opt_in ? "bg-black text-[#00FF41]" : "bg-black text-[#808080] hover:text-white"}`}
+          >
+            <span className={`w-3 h-3 inline-block ${user?.leaderboard_opt_in ? "bg-[#00FF41]" : "ae-border-strong"}`} />
+            <span className="mono text-[10px] tracking-widest">
+              {user?.leaderboard_opt_in ? "LEADERBOARD · LISTED" : "LEADERBOARD · PRIVATE"}
+            </span>
+          </button>
+          <button
+            data-testid="new-audit-btn"
+            onClick={() => setOpen(true)}
+            className="mono text-xs tracking-[0.2em] ae-border-strong px-8 py-4 bg-[#00FF41] text-black hover:bg-white transition-colors"
+          >
+            + NEW AUDIT
+          </button>
+        </div>
       </div>
 
       <div className="px-8 py-6">

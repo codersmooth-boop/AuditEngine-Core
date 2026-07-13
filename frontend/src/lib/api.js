@@ -13,6 +13,11 @@ export async function fetchMe() {
   return r.data;
 }
 
+export async function setLeaderboardOptIn(optIn) {
+  const r = await api.patch("/settings/leaderboard", { opt_in: optIn });
+  return r.data;
+}
+
 export async function logout() {
   await api.post("/auth/logout");
 }
