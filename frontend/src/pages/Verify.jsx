@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
+import ReproductionTest from "../components/ReproductionTest";
 
 export default function Verify() {
   const nav = useNavigate();
@@ -154,6 +155,11 @@ export default function Verify() {
           <div className="mt-10 mono text-[10px] text-[#808080] leading-relaxed max-w-2xl">
             The Trust Anchor exposes existence and integrity metadata only — no client identities,
             no findings, no financial figures. Verification does not require an account.
+          </div>
+
+          {/* Signed Reproduction Test — deterministic protocol proof */}
+          <div className="mt-12" data-testid="reproduction-section">
+            <ReproductionTest expectedRoot={state === "verified" ? root.trim().toLowerCase() : ""} />
           </div>
         </div>
       </main>
