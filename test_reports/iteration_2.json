@@ -1,0 +1,38 @@
+{
+  "summary": "HOSTILE forensic audit complete. All 8 backend hostile tests + all 6 frontend hostile flows + aesthetic audit PASS. Verification log below.",
+  "verification_log": [
+    {"id": "BE#1", "action": "User A + User B upload identical bytes, both call /api/ledger/snapshot-meta?year=2025", "expected": "A→200; B→409 'Merkle root already registered under a different workspace.'", "actual": "A returned merkle_root=757de401…; B returned 409 with detail matching 'already registered under a different workspace'", "verdict": "PASS"},
+    {"id": "BE#2", "action": "GET /api/ledger/snapshot-meta?year=2099 authenticated (no audits)", "expected": "HTTP 400 detail 'Cannot attest to an empty ledger.'", "actual": "400, detail contained 'empty ledger'", "verdict": "PASS"},
+    {"id": "BE#3", "action": "User A regenerates snapshot for FY2025; count registry total before/after", "expected": "total unchanged (upsert not insert), same merkle_root", "actual": "total unchanged; merkle_root identical", "verdict": "PASS"},
+    {"id": "BE#4", "action": "75 rapid GET /api/public/verify/<root> via localhost:8001 with X-Forwarded-For=9.9.9.9", "expected": "~60 first requests 200/404, subsequent ~15 return 429", "actual": "60 OK + 15 x 429 observed", "verdict": "PASS"},
+    {"id": "BE#5a", "action": "GET /api/public/registry", "expected": "entries expose ONLY {merkle_root, reporting_year, audit_count, generated_at}", "actual": "no extra keys", "verdict": "PASS"},
+    {"id": "BE#5b", "action": "GET /api/public/leaderboard", "expected": "entries expose ONLY the allowed 8 keys", "actual": "no extra keys", "verdict": "PASS"},
+    {"id": "BE#5c", "action": "GET /api/public/verify/<real_root>", "expected": "returns ONLY {status, workspace_id_hashed, audit_count, reporting_year, timestamp}", "actual": "no extra keys", "verdict": "PASS"},
+    {"id": "BE#6", "action": "Static inspect /app/backend/llm_service.py — SYSTEM_PROMPT + analyze_documents()", "expected": "CRITICAL SECURITY DIRECTIVE section, <UNTRUSTED_DATA> delimiter, refuse-instructions clause, executive_summary flag guidance, sanitization of pre-existing </UNTRUSTED_DATA> tokens", "actual": "all five present verbatim; sanitization at line 112 replaces closing tag with </UNTRUSTED_DATA_SANITIZED>", "verdict": "PASS"},
+    {"id": "BE#7", "action": "Compute merkle in Python: sha256(sha256(sha256(bytes).hex().encode()).hex().encode()) vs backend merkle_root for evidence bytes 'deterministic evidence for reproduction test'", "expected": "byte-for-byte equal", "actual": "757de401ece91966477aa6b6d5e344453a7dece9fa4d417f66e1a2b7fa1c18bc == backend value", "verdict": "PASS"},
+    {"id": "FE#1", "action": "Landing → public-verify-link → paste real root → VERIFY INTEGRITY → certificate → verify-view-all-btn → /registry with registry-workspace-filter chip", "expected": "green [VERIFIED] header, filter chip visible", "actual": "header text '[VERIFIED]' color rgb(0,255,65); filter chip located", "verdict": "PASS"},
+    {"id": "FE#2", "action": "Landing → public-registry-link → click registry-row-* → /verify?root=<hash>", "expected": "cert panel auto-hydrates WITHOUT user clicking VERIFY", "actual": "verify-certificate rendered from URL param via useEffect", "verdict": "PASS"},
+    {"id": "FE#3", "action": "/verify?root=<hash> upload same evidence bytes to repro-file-input-1", "expected": "repro-match [DETERMINISTIC MATCH] renders green", "actual": "repro-match visible", "verdict": "PASS"},
+    {"id": "FE#4", "action": "/verify?root=<hash> upload WRONG bytes", "expected": "repro-mismatch [MISMATCH] renders red", "actual": "repro-mismatch visible", "verdict": "PASS"},
+    {"id": "FE#5", "action": "Click + ADD AUDIT GROUP", "expected": "repro-group-2 rendered; second file input works; composites update", "actual": "group-2 visible, second composite computed", "verdict": "PASS"},
+    {"id": "UI/UX", "action": "Aesthetic audit /, /verify, /registry, /leaderboard @ 1920x1080", "expected": "bg #000000, no border-radius on top-level shells/tables/buttons, no box-shadow, Roboto Mono on .mono, Inter on H1", "actual": "body bg=rgb(0,0,0) on all 4 pages; h1 font-family='Inter, system-ui, sans-serif'; .mono font-family='Roboto Mono, ui-monospace, monospace'; ZERO border-radius/box-shadow deviations detected across button/table/header/footer elements", "verdict": "PASS"}
+  ],
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/test_hostile_backend.py", "/app/test_reports/pytest/hostile_backend.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py at 835 lines is approaching the 700-line split threshold — consider extracting the /ledger + /public routes into a dedicated module.",
+    "Public endpoints all use @limiter.limit('60/minute') with in-memory buckets — this is single-instance only and will not survive horizontal scaling. Fine for MVP; document if going multi-replica.",
+    "/api/public/leaderboard cache is 60s in-memory; same single-instance caveat.",
+    "get_current_user has 3 near-identical variants for session lookup (route-level + stream endpoint). Consider a shared helper accepting either cookie/bearer/query token.",
+    "No index on user_sessions.expires_at → expired sessions accumulate; add TTL index (expireAfterSeconds:0) or scheduled cleanup."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Seeded two workspace sessions via mongosh per /app/memory/test_credentials.md. Bearer TOKEN_A=test_session_A_1784132288172, TOKEN_B=test_session_B_1784132288172.",
+  "seed_data_creation": "Two workspaces (user A + user B), each with one COMPLETE audit for FY2025 containing identical evidence bytes b'deterministic evidence for reproduction test'.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend hostile suite lives at /app/backend/tests/test_hostile_backend.py. Requires env TOKEN_A + TOKEN_B (bearer tokens of two seeded workspaces). Reproduction merkle for evidence bytes = 757de401ece91966477aa6b6d5e344453a7dece9fa4d417f66e1a2b7fa1c18bc. Rate limit test must use http://localhost:8001 because k8s ingress rewrites X-Forwarded-For."
+}
