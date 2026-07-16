@@ -117,12 +117,17 @@ def make_router(db):
 
 
 async def handle_stripe_webhook(request: Request, db) -> dict:
-    """Registered by server.py at POST /api/webhook/stripe."""
+    """Registered by server.py at POST /api/webhook/stripe.
+
+    Compatible with both Stripe payload styles:
+    - Snapshot: event.data.object contains the full object.
+    - Thin:     event.data.object contains only {id, object} — we re-fetch
+                via the Stripe API to enrich before persisting.
+    """
     _load_stripe_key()
     payload = await request.body()
     sig = request.headers.get("stripe-signature", "")
     if not STRIPE_WEBHOOK_SECRET:
-        # Without a shared secret we cannot trust the payload. Reject.
         raise HTTPException(400, "Webhook secret not configured")
     try:
         event = stripe.Webhook.construct_event(payload, sig, STRIPE_WEBHOOK_SECRET)
@@ -132,36 +137,71 @@ async def handle_stripe_webhook(request: Request, db) -> dict:
         raise HTTPException(400, f"Malformed webhook: {e}")
 
     obj = event["data"]["object"]
+    obj_type = obj.get("object")
+    obj_id = obj.get("id")
     t = event["type"]
     now = datetime.now(timezone.utc)
-    if t == "checkout.session.completed":
-        await db.payment_transactions.update_one(
-            {"session_id": obj["id"], "payment_status": {"$ne": "paid"}},
-            {"$set": {
-                "status": "completed",
-                "payment_status": obj.get("payment_status", "paid"),
-                "stripe_subscription_id": obj.get("subscription"),
-                "updated_at": now,
-            }},
-        )
-    elif t == "checkout.session.async_payment_succeeded":
-        await db.payment_transactions.update_one(
-            {"session_id": obj["id"]},
-            {"$set": {"payment_status": "paid", "updated_at": now}},
-        )
-    elif t == "checkout.session.async_payment_failed":
-        await db.payment_transactions.update_one(
-            {"session_id": obj["id"]},
-            {"$set": {"status": "failed", "payment_status": "failed", "updated_at": now}},
-        )
-    elif t == "checkout.session.expired":
-        await db.payment_transactions.update_one(
-            {"session_id": obj["id"]},
-            {"$set": {"status": "expired", "payment_status": "expired", "updated_at": now}},
-        )
-    elif t == "charge.refunded":
-        await db.payment_transactions.update_one(
-            {"stripe_payment_intent_id": obj.get("payment_intent")},
-            {"$set": {"status": "refunded", "payment_status": "refunded", "updated_at": now}},
-        )
-    return {"status": "ok"}
+
+    def _is_thin(o: dict) -> bool:
+        # A thin payload carries id/object and little else. We defensively
+        # re-fetch anytime a hint field for the given event type is missing.
+        return len(o.keys()) <= 3
+
+    # --- checkout.session.* events ------------------------------------------
+    if t.startswith("checkout.session.") and obj_type == "checkout.session":
+        if _is_thin(obj) or "payment_status" not in obj:
+            try:
+                obj = stripe.checkout.Session.retrieve(obj_id).to_dict_recursive()
+            except stripe.error.StripeError:
+                pass
+
+        payment_status = obj.get("payment_status", "pending")
+        subscription_id = obj.get("subscription")
+
+        if t == "checkout.session.completed":
+            await db.payment_transactions.update_one(
+                {"session_id": obj_id, "payment_status": {"$ne": "paid"}},
+                {"$set": {
+                    "status": "completed",
+                    "payment_status": payment_status or "paid",
+                    "stripe_subscription_id": subscription_id,
+                    "amount_total": obj.get("amount_total"),
+                    "currency": obj.get("currency"),
+                    "updated_at": now,
+                }},
+            )
+        elif t == "checkout.session.async_payment_succeeded":
+            await db.payment_transactions.update_one(
+                {"session_id": obj_id},
+                {"$set": {"payment_status": "paid", "status": "completed", "updated_at": now}},
+            )
+        elif t == "checkout.session.async_payment_failed":
+            await db.payment_transactions.update_one(
+                {"session_id": obj_id},
+                {"$set": {"status": "failed", "payment_status": "failed", "updated_at": now}},
+            )
+        elif t == "checkout.session.expired":
+            await db.payment_transactions.update_one(
+                {"session_id": obj_id},
+                {"$set": {"status": "expired", "payment_status": "expired", "updated_at": now}},
+            )
+        return {"status": "ok", "type": t, "session_id": obj_id}
+
+    # --- charge.refunded ----------------------------------------------------
+    if t == "charge.refunded":
+        pi = obj.get("payment_intent")
+        if not pi and _is_thin(obj):
+            try:
+                obj = stripe.Charge.retrieve(obj_id).to_dict_recursive()
+                pi = obj.get("payment_intent")
+            except stripe.error.StripeError:
+                pass
+        if pi:
+            await db.payment_transactions.update_one(
+                {"stripe_payment_intent_id": pi},
+                {"$set": {"status": "refunded", "payment_status": "refunded", "updated_at": now}},
+            )
+        return {"status": "ok", "type": t, "payment_intent": pi}
+
+    # --- unhandled event types are still 200-OK'd so Stripe doesn't retry ----
+    return {"status": "ok", "type": t, "handled": False}

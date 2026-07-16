@@ -60,7 +60,11 @@ Build a high-precision, enterprise-grade ESG Compliance Intelligence Platform ("
   - `load_dotenv(..., override=True)` in both `server.py` and `stripe_billing.py` — defence against stale shell env clobbering.
   - Frontend `/pricing` rewritten to **PRICING SPECIFICATIONS** spec-grid (PART 2): header `AUDITENGINE // PRICING SPECIFICATIONS`, H1 `Deterministic billing. Fixed-precision tiers.`, strict aligned feature rows across all three tiers, no marketing copy. Exact feature list per user spec. Email obfuscation preserved (char-code assembly at click-time).
   - Verification: `stripe.checkout.Session.list()` on user's key confirms sessions are on `acct_1TtrBl2EF5EE1c01` with correct price IDs and amounts.
-- **Testing (iter 5)**: 25/25 backend + 100% frontend. Zero critical, zero minor.
+- **2026-07-16 (fork · webhook activation)** — **Financial loop closed**:
+  - `STRIPE_WEBHOOK_SECRET` set in `.env`. Backend restarted; secret loaded via `load_dotenv(override=True)`.
+  - `handle_stripe_webhook` upgraded to dual-mode: Snapshot payloads persist directly; Thin payloads (`_is_thin` = ≤3 keys or missing `payment_status`) trigger a `Session.retrieve()` / `Charge.retrieve()` enrichment before DB writes. Handles `checkout.session.{completed,async_payment_succeeded,async_payment_failed,expired}` and `charge.refunded`. Unhandled types still 200-OK so Stripe does not retry.
+  - E2E validated with signed payloads: Snapshot → 200 + Mongo `paid/completed`; Thin → 200 + Stripe re-fetch → correct Mongo state; Bad signature → 400.
+  - Loop: **Frontend /pricing → POST /api/payments/checkout → checkout.stripe.com (user's account) → return to /payment/success → webhook (Snapshot|Thin) → payment_transactions ledger row `paid/completed`**.
 
 ## Prioritized Backlog
 - **P1** — Redis-backed rate limiter for horizontal scale-out (currently in-process memory).
