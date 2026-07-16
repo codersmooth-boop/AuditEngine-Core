@@ -10,6 +10,9 @@ import Verify from "@/pages/Verify";
 import Registry from "@/pages/Registry";
 import Leaderboard from "@/pages/Leaderboard";
 import Regulator from "@/pages/Regulator";
+import Pricing from "@/pages/Pricing";
+import PaymentSuccess from "@/pages/PaymentSuccess";
+import PaymentCancel from "@/pages/PaymentCancel";
 import AuthCallback from "@/pages/AuthCallback";
 
 function Protected({ children }) {
@@ -29,6 +32,9 @@ function RouterShell() {
       <Route path="/registry" element={<Registry />} />
       <Route path="/leaderboard" element={<Leaderboard />} />
       <Route path="/regulator" element={<Regulator />} />
+      <Route path="/pricing" element={<Pricing />} />
+      <Route path="/payment/success" element={<PaymentSuccess />} />
+      <Route path="/payment/cancel" element={<PaymentCancel />} />
       <Route path="/dashboard" element={<Protected><Dashboard /></Protected>} />
       <Route path="/ledger" element={<Protected><Ledger /></Protected>} />
       <Route path="/audits/:id" element={<Protected><AuditView /></Protected>} />

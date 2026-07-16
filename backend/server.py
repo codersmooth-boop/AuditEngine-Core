@@ -18,6 +18,7 @@ from llm_service import analyze_documents
 from pdf_service import build_audit_pdf, build_board_brief_pdf, build_snapshot_pdf
 from file_extractor import extract_text_from_file
 from regulator_sandbox import make_router as make_regulator_router, issue_key as issue_regulator_key
+from stripe_billing import make_router as make_billing_router, handle_stripe_webhook
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -810,6 +811,12 @@ async def public_verify(request: Request, merkle_root: str):
 
 app.include_router(api_router)
 app.include_router(make_regulator_router(db))
+app.include_router(make_billing_router(db))
+
+
+@app.post("/api/stripe/webhook")
+async def stripe_webhook(request: Request):
+    return await handle_stripe_webhook(request, db)
 
 app.add_middleware(
     CORSMiddleware,
@@ -865,6 +872,8 @@ async def _create_indexes():
         await db.user_sessions.create_index("expires_at", expireAfterSeconds=0)
         await db.regulator_keys.create_index("key_hash", unique=True)
         await db.regulator_keys.create_index("expires_at")
+        await db.payment_transactions.create_index("session_id", unique=True)
+        await db.payment_transactions.create_index([("created_at", -1)])
         logger.info("Indexes ensured on hot-path collections (incl. TTL on user_sessions.expires_at)")
     except Exception as e:
         logger.warning(f"Index creation warning (may pre-exist): {e}")

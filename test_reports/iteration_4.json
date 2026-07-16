@@ -1,0 +1,31 @@
+{
+  "summary": "Comprehensive backend testing of Stripe Checkout integration for AuditEngine (Flow A · SMP). 21/21 tests passed. Verified: happy-path checkout for both plans returning valid https://checkout.stripe.com URLs, pydantic validation (invalid lookup_key, missing origin_url, empty body, out-of-range quantity all return 422), Mongo payment_transactions row persisted before response with correct amount (4900 monthly, 49000 yearly, currency=eur, status=initiated, payment_status=pending), idempotency (two calls produce two distinct session_ids and DB rows), /api/payments/status/{sid} returns exactly {session_id,status,payment_status} with no PII, unknown session_id returns 404, Stripe Price catalog amounts match (4900/49000 EUR recurring month/year), success_url/cancel_url shape verified via stripe.Session.retrieve, webhook rejects missing and invalid Stripe-Signature with 400, unique index on session_id and descending index on created_at present, regression on /api/public/registry, /api/public/verify, /api/regulator/sandbox, /api/audits still passing. Also confirmed the previously-flagged /api/auth/session empty-body 500 has been FIXED (now returns 400).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_stripe_billing.py",
+    "/app/test_reports/pytest/stripe_billing.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "stripe_billing.py line 18: fallback `stripe.api_key = ... or 'sk_test_emergent'` masks a missing secret at import time; would produce confusing 401s from Stripe rather than a clear startup failure. Consider raising if STRIPE_SECRET_KEY missing.",
+    "stripe_billing.py line 36: when Price.list returns empty (misconfigured catalog) endpoint raises HTTPException(500). Since lookup_key is already whitelisted by pydantic regex, a 500 is acceptable but arguably should be 503 (config error) rather than 500.",
+    "stripe_billing.py get_status: reads live session from Stripe on every non-paid poll. For high-traffic pricing pages this could hit Stripe rate limits; consider caching or relying on webhook exclusively.",
+    "server.py at ~876 lines still exceeds >700 recommended threshold — Stripe route mount is clean but overall file should be split (auth, public registry, audits, stripe) into modular routers.",
+    "No cleanup / TTL on payment_transactions rows in `initiated`/`pending` state — will accumulate abandoned-cart rows indefinitely. Consider TTL index on created_at with `partialFilterExpression` for payment_status=='pending'.",
+    "handle_stripe_webhook: charge.refunded handler updates by stripe_payment_intent_id but this field is only populated post-completion; refund on a Session that never wrote the intent (edge case) would silently no-op."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_stripe_billing.py"
+  ],
+  "success_rate": {"backend": "100% (21/21)", "frontend": "skipped per request"},
+  "test_credentials": "None required for Stripe endpoints. Backend .env provides STRIPE_SECRET_KEY (sandbox test mode).",
+  "seed_data_creation": "Test created ~7 payment_transactions rows (all in `initiated/pending` state, sandbox sessions). Not cleaned up — mirror real user-abandoned checkouts. Recommend TTL index (see code-review comment).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Stripe integration is production-quality on the backend side. Prices confirmed at 4900 EUR/mo and 49000 EUR/yr under lookup_keys professional_monthly & annual_yearly. Webhook signature validation works. DB row is written before response (row-before-return semantics preserved). The previously-flagged /api/auth/session empty-body 500 has been fixed to 400. Frontend /pricing and /payment/{success,cancel} were skipped per request.",
+  "rca of the issue": "N/A — no bugs found in Stripe integration."
+}
