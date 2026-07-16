@@ -166,7 +166,12 @@ async def get_current_user(request: Request) -> dict:
 
 @api_router.post("/auth/session")
 async def create_session(request: Request, response: Response):
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Body must be a JSON object")
     session_id = body.get("session_id")
     if not session_id:
         raise HTTPException(status_code=400, detail="session_id required")
