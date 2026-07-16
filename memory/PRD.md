@@ -52,12 +52,15 @@ Build a high-precision, enterprise-grade ESG Compliance Intelligence Platform ("
   - Enterprise "CONTACT FOR QUOTE" — email `codersmooth@gmail.com` obfuscated as `String.fromCharCode(...)` arrays, assembled only on user click. HTML source contains ZERO email/`gmail`/`codersmooth` literals (verified).
   - `/payment/success` — polls status 8× at 2s, renders receipt card with session ID + status pill; `/payment/cancel` explains no-charge state and returns to /pricing.
   - Mongo `payment_transactions` collection with unique index on `session_id` + descending index on `created_at`.
-- **Testing (iter 4)**: 21/21 pass. Zero critical, zero minor. All webhook signature/idempotency/pydantic/DB-row-before-return semantics verified.
-
-## Sandbox key handoff
-- Onboarding URL (share with user, one click to convert to real account): captured in fork context.
-- Stripe test card: `4242 4242 4242 4242`, any future expiry, any CVC.
-- Tax mode selected: **Stripe manages everything including tax and compliance (+3.5% per transaction)** — available in ~80 countries. Alternatives on request: Stripe calculates tax only (+0.5%) or DIY (no tax help).
+- **2026-07-16 (fork · migration)** — **Stripe → BYOK**:
+  - Deleted the previously-provisioned claimable sandbox (`acct_1TsNh0…`, DELETE 204).
+  - `.env` reduced to a single `STRIPE_API_KEY` pointing at the user's own Stripe account `acct_1TtrBl2EF5EE1c01` (FI). No sandbox residue.
+  - `stripe_billing.py` rewritten as raw `stripe` SDK (Flow B, `emergentintegrations` cannot do `mode='subscription'`). `PLANS` dict maps `professional_monthly → price_1TtrVK2EF5EE1c01gRIxaKIX` (€49/mo) and `annual_yearly → price_1Ttrdg2EF5EE1c01qEOTjEM4` (€490/yr). Sessions created in `mode='subscription'`.
+  - Webhook path moved to `POST /api/webhook/stripe` per Flow B convention. Signature-verified; handles completed / async success/fail / expired / refunded.
+  - `load_dotenv(..., override=True)` in both `server.py` and `stripe_billing.py` — defence against stale shell env clobbering.
+  - Frontend `/pricing` rewritten to **PRICING SPECIFICATIONS** spec-grid (PART 2): header `AUDITENGINE // PRICING SPECIFICATIONS`, H1 `Deterministic billing. Fixed-precision tiers.`, strict aligned feature rows across all three tiers, no marketing copy. Exact feature list per user spec. Email obfuscation preserved (char-code assembly at click-time).
+  - Verification: `stripe.checkout.Session.list()` on user's key confirms sessions are on `acct_1TtrBl2EF5EE1c01` with correct price IDs and amounts.
+- **Testing (iter 5)**: 25/25 backend + 100% frontend. Zero critical, zero minor.
 
 ## Prioritized Backlog
 - **P1** — Redis-backed rate limiter for horizontal scale-out (currently in-process memory).

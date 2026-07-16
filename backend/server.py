@@ -21,7 +21,7 @@ from regulator_sandbox import make_router as make_regulator_router, issue_key as
 from stripe_billing import make_router as make_billing_router, handle_stripe_webhook
 
 ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+load_dotenv(ROOT_DIR / '.env', override=True)
 
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)

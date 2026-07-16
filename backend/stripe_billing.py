@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-load_dotenv(Path(__file__).parent / ".env")
+load_dotenv(Path(__file__).parent / ".env", override=True)
 
 # Fixed, server-side catalog. Frontend sends only plan_id.
 PLANS = {
