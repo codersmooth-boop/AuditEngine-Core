@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 6: /api/payments/tier and /api/payments/portal endpoints + webhook user-linking verified end-to-end against LIVE Stripe test-mode (acct_1TtrBl2EF5EE1c01). 11 new tests + 25 regression tests = 36/36 pass. Real Stripe Customer + Subscription created via tok_visa payment method and torn down cleanly in fixture finalizer (no residue on user's Stripe account).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_billing_tier_portal.py",
+    "/app/backend/tests/test_stripe_billing.py",
+    "/app/test_reports/pytest/iteration_6.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "stripe_billing.py _resolve_active_tier(): stripe.error.StripeError is caught and silently returns free — good, but a WARN log would help forensics when Stripe API is transiently down (currently indistinguishable from a genuinely-free user).",
+    "stripe_billing.py portal handler: catches only InvalidRequestError for 'no configuration' branch. Other Stripe errors (e.g. network, auth) fall through with `raise` inside the except → returns a 500 with a bare traceback because `raise HTTPException(502, ...)` is inside an inner `else`. Consider a broader try/except around the whole session.create block.",
+    "Webhook thin-payload handling relies on re-fetching Session by id; if Stripe SDK retrieve fails (network / non-existent id), the linkage side-effect is silently skipped (customer_id remains None). Add debug log so operators can see when the link failed.",
+    "PLANS mapping (professional_monthly, annual_yearly) is duplicated between backend and (implicit) frontend labels. Consider a single source of truth exported via /api/payments/plans."
+  ],
+  "updated_files": ["/app/backend/tests/test_billing_tier_portal.py"],
+  "success_rate": {"backend": "100% (36/36)", "frontend": "n/a (backend only per request)"},
+  "test_credentials": "Test users seeded directly into Mongo with email pattern testing-agent-*@auditengine.example, session_token in user_sessions (expires_at = now+2h). Stripe test payment method token 'tok_visa'.",
+  "seed_data_creation": "Ephemeral: each test seeds a fresh user + user_sessions row, then _cleanup_user() deletes users/user_sessions/payment_transactions for that user_id in a finally block. Stripe Customers/Subscriptions created in TestTierActiveSubscription fixture are canceled + deleted in the fixture finalizer.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run `cd /app/backend && python -m pytest tests/test_billing_tier_portal.py tests/test_stripe_billing.py -v -o addopts=''` to reproduce. The TestTierActiveSubscription class-scoped fixture creates a REAL Stripe test-mode Customer + Subscription (tok_visa) and MUST tear down — do not stop pytest mid-run with SIGKILL, otherwise a live subscription/customer will linger on acct_1TtrBl2EF5EE1c01. Newer Stripe API (basil-2025-03-31) removed Invoice.payment_intent — subscription creation now relies on customer.default_payment_method auto-charging. Webhook secret whsec_92nf8thb5AsJMu5EvMDtezmW09AhdL8U is populated in backend/.env. Frontend components (ProvisionAccessLink.jsx, Pricing.jsx) verified by source-grep only (Google-OAuth-gated UI not exercised).",
+  "verification_evidence": {
+    "tier_free_user": "GET /api/payments/tier → 200 {tier:'free', active:false, plan_id:null, stripe_customer_id:null}",
+    "tier_active_sub": "Real Stripe Subscription (tok_visa) on customer cus_… reaches status=active, backend returns {tier:'professional_monthly', active:true, plan_id:'professional_monthly', stripe_customer_id:'cus_…', stripe_status:'active'}",
+    "tier_canceled_sub": "GET /api/payments/tier with stripe_subscription_id='sub_nonexistent_…' → StripeError caught, returns free/inactive",
+    "portal_free_user": "POST /api/payments/portal → 400 detail 'No active subscription — nothing to manage'",
+    "portal_paid_user": "POST /api/payments/portal → 200 with portal_url starting https://billing.stripe.com/ (portal configuration auto-provisioned when needed)",
+    "webhook_snapshot_link": "Signed checkout.session.completed with metadata.user_id + customer=cus_… → users.stripe_customer_id populated in Mongo",
+    "webhook_thin_link": "Signed thin payload {id, object:'checkout.session'} referencing a real Stripe Session with metadata.user_id + customer → handler re-fetches, users.stripe_customer_id populated",
+    "checkout_user_id_persistence": "POST /api/payments/checkout with user_id → payment_transactions row has matching user_id",
+    "auth_gating": "Tier + Portal endpoints return 401 without session cookie AND with invalid session token",
+    "regression_25_tests": "All previously-passing checkout / status / webhook signature / validation / regulator sandbox auth / audits auth / public registry+leaderboard+verify pass unchanged"
+  }
+}

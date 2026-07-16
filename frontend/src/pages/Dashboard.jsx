@@ -4,6 +4,7 @@ import { useAuth } from "../lib/auth";
 import { listAudits, deleteAudit, setLeaderboardOptIn, api } from "../lib/api";
 import NewAuditDrawer from "../components/NewAuditDrawer";
 import UtcClock from "../components/UtcClock";
+import ProvisionAccessLink from "../components/ProvisionAccessLink";
 
 export default function Dashboard() {
   const { user, logout, refresh } = useAuth();
@@ -63,6 +64,7 @@ export default function Dashboard() {
         </div>
         <div className="flex items-center gap-6">
           <UtcClock />
+          <ProvisionAccessLink />
           <div className="mono text-[10px] text-[#808080]" data-testid="user-email">{user?.email}</div>
           <button data-testid="logout-btn" onClick={logout} className="mono text-[10px] text-[#808080] hover:text-[#FF0000]">LOGOUT</button>
         </div>

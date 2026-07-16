@@ -811,7 +811,7 @@ async def public_verify(request: Request, merkle_root: str):
 
 app.include_router(api_router)
 app.include_router(make_regulator_router(db))
-app.include_router(make_billing_router(db))
+app.include_router(make_billing_router(db, get_current_user))
 
 
 @app.post("/api/webhook/stripe")

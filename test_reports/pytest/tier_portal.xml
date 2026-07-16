@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="2" failures="0" skipped="0" tests="11" time="7.516" timestamp="2026-07-16T17:47:29.127371+00:00" hostname="agent-env-fd9a5b32-55f7-4155-8304-6ce4c76b35bb"><testcase classname="tests.test_billing_tier_portal.TestAuthGating" name="test_tier_requires_auth" time="0.373" /><testcase classname="tests.test_billing_tier_portal.TestAuthGating" name="test_tier_bad_session_401" time="0.165" /><testcase classname="tests.test_billing_tier_portal.TestAuthGating" name="test_portal_requires_auth" time="0.138" /><testcase classname="tests.test_billing_tier_portal.TestTierFreeUser" name="test_no_transactions_returns_free" time="0.180" /><testcase classname="tests.test_billing_tier_portal.TestTierFreeUser" name="test_portal_free_user_400" time="0.132" /><testcase classname="tests.test_billing_tier_portal.TestTierCanceledSub" name="test_nonexistent_sub_returns_free" time="0.563" /><testcase classname="tests.test_billing_tier_portal.TestTierActiveSubscription" name="test_active_sub_tier" time="3.740"><error message="failed on setup with &quot;AttributeError: The 'payment_intent' attribute is no longer available on Invoice objects. See the docs for more details: https://docs.stripe.com/changelog/basil/2025-03-31/add-support-for-multiple-partial-payments-on-invoices#why-is-this-a-breaking-change&quot;">/root/.venv/lib/python3.11/site-packages/stripe/_stripe_object.py:207: in __getitem__
+    return super(StripeObject, self).__getitem__(k)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'payment_intent'
+
+During handling of the above exception, another exception occurred:
+/root/.venv/lib/python3.11/site-packages/stripe/_stripe_object.py:177: in __getattr__
+    return self[k]
+           ^^^^^^^
+/root/.venv/lib/python3.11/site-packages/stripe/_stripe_object.py:224: in __getitem__
+    raise KeyError(
+E   KeyError: "The 'payment_intent' attribute is no longer available on Invoice objects. See the docs for more details: https://docs.stripe.com/changelog/basil/2025-03-31/add-support-for-multiple-partial-payments-on-invoices#why-is-this-a-breaking-change"
+
+The above exception was the direct cause of the following exception:
+tests/test_billing_tier_portal.py:178: in active_sub_ctx
+    pi_id = sub.latest_invoice.payment_intent.id if sub.latest_invoice and sub.latest_invoice.payment_intent else None
+                                                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/stripe/_stripe_object.py:179: in __getattr__
+    raise AttributeError(*err.args) from err
+E   AttributeError: The 'payment_intent' attribute is no longer available on Invoice objects. See the docs for more details: https://docs.stripe.com/changelog/basil/2025-03-31/add-support-for-multiple-partial-payments-on-invoices#why-is-this-a-breaking-change</error></testcase><testcase classname="tests.test_billing_tier_portal.TestTierActiveSubscription" name="test_portal_paid_user_returns_url" time="0.000"><error message="failed on setup with &quot;AttributeError: The 'payment_intent' attribute is no longer available on Invoice objects. See the docs for more details: https://docs.stripe.com/changelog/basil/2025-03-31/add-support-for-multiple-partial-payments-on-invoices#why-is-this-a-breaking-change&quot;">/root/.venv/lib/python3.11/site-packages/stripe/_stripe_object.py:207: in __getitem__
+    return super(StripeObject, self).__getitem__(k)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'payment_intent'
+
+During handling of the above exception, another exception occurred:
+/root/.venv/lib/python3.11/site-packages/stripe/_stripe_object.py:177: in __getattr__
+    return self[k]
+           ^^^^^^^
+/root/.venv/lib/python3.11/site-packages/stripe/_stripe_object.py:224: in __getitem__
+    raise KeyError(
+E   KeyError: "The 'payment_intent' attribute is no longer available on Invoice objects. See the docs for more details: https://docs.stripe.com/changelog/basil/2025-03-31/add-support-for-multiple-partial-payments-on-invoices#why-is-this-a-breaking-change"
+
+The above exception was the direct cause of the following exception:
+tests/test_billing_tier_portal.py:178: in active_sub_ctx
+    pi_id = sub.latest_invoice.payment_intent.id if sub.latest_invoice and sub.latest_invoice.payment_intent else None
+                                                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/root/.venv/lib/python3.11/site-packages/stripe/_stripe_object.py:179: in __getattr__
+    raise AttributeError(*err.args) from err
+E   AttributeError: The 'payment_intent' attribute is no longer available on Invoice objects. See the docs for more details: https://docs.stripe.com/changelog/basil/2025-03-31/add-support-for-multiple-partial-payments-on-invoices#why-is-this-a-breaking-change</error></testcase><testcase classname="tests.test_billing_tier_portal.TestWebhookUserLinking" name="test_snapshot_payload_links_customer" time="0.189" /><testcase classname="tests.test_billing_tier_portal.TestWebhookUserLinking" name="test_thin_payload_links_customer" time="1.384" /><testcase classname="tests.test_billing_tier_portal.TestCheckoutUserIdPersistence" name="test_user_id_persisted_in_row" time="0.507" /></testsuite></testsuites>

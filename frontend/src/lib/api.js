@@ -80,3 +80,13 @@ export function auditLogUrl(id) {
 export function snapshotUrl(year) {
   return `${API}/ledger/snapshot?year=${year}`;
 }
+
+export async function getBillingTier() {
+  const r = await api.get("/payments/tier");
+  return r.data;
+}
+
+export async function createPortalSession(returnUrl) {
+  const r = await api.post("/payments/portal", { return_url: returnUrl });
+  return r.data;
+}

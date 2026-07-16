@@ -19,7 +19,7 @@ from typing import Optional
 
 import stripe
 from dotenv import load_dotenv
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 load_dotenv(Path(__file__).parent / ".env", override=True)
@@ -48,8 +48,35 @@ class CheckoutRequest(BaseModel):
     user_id: Optional[str] = None
 
 
-def make_router(db):
+def make_router(db, get_current_user):
     router = APIRouter(prefix="/api/payments", tags=["payments"])
+
+    async def _resolve_active_tier(user_id: str) -> dict:
+        """Return {tier, active, plan_id, stripe_customer_id, current_period_end}
+        for the given user. `tier` is 'free' or a plan_id."""
+        _load_stripe_key()
+        row = await db.payment_transactions.find_one(
+            {"user_id": user_id, "payment_status": "paid",
+             "stripe_subscription_id": {"$ne": None}},
+            sort=[("updated_at", -1)],
+        )
+        if not row or not row.get("stripe_subscription_id"):
+            return {"tier": "free", "active": False, "plan_id": None,
+                    "stripe_customer_id": None, "current_period_end": None}
+        try:
+            sub = stripe.Subscription.retrieve(row["stripe_subscription_id"])
+        except stripe.error.StripeError:
+            return {"tier": "free", "active": False, "plan_id": None,
+                    "stripe_customer_id": None, "current_period_end": None}
+        active = sub.status in ("active", "trialing", "past_due")
+        return {
+            "tier": row["plan_id"] if active else "free",
+            "active": active,
+            "plan_id": row["plan_id"],
+            "stripe_customer_id": sub.customer if isinstance(sub.customer, str) else sub.customer.id,
+            "current_period_end": sub.get("current_period_end") if hasattr(sub, "get") else None,
+            "stripe_status": sub.status,
+        }
 
     @router.post("/checkout")
     async def create_checkout(req: CheckoutRequest):
@@ -113,6 +140,51 @@ def make_router(db):
             "payment_status": record["payment_status"],
         }
 
+    @router.get("/tier")
+    async def get_tier(user: dict = Depends(get_current_user)):
+        info = await _resolve_active_tier(user["user_id"])
+        return info
+
+    class PortalRequest(BaseModel):
+        return_url: str
+
+    @router.post("/portal")
+    async def create_portal_session(req: PortalRequest, user: dict = Depends(get_current_user)):
+        info = await _resolve_active_tier(user["user_id"])
+        customer_id = info.get("stripe_customer_id")
+        if not customer_id:
+            raise HTTPException(400, "No active subscription — nothing to manage")
+        _load_stripe_key()
+        try:
+            session = stripe.billing_portal.Session.create(
+                customer=customer_id,
+                return_url=req.return_url,
+            )
+        except stripe.error.InvalidRequestError as e:
+            msg = (e.user_message or str(e)).lower()
+            if "no configuration" in msg or "default configuration" in msg:
+                # Auto-provision a minimal portal configuration for this account.
+                cfg = stripe.billing_portal.Configuration.create(
+                    business_profile={"headline": "AuditEngine · Manage subscription"},
+                    features={
+                        "customer_update": {"enabled": True, "allowed_updates": ["email", "address"]},
+                        "invoice_history": {"enabled": True},
+                        "payment_method_update": {"enabled": True},
+                        "subscription_cancel": {"enabled": True, "mode": "at_period_end"},
+                        "subscription_update": {
+                            "enabled": True, "default_allowed_updates": ["price"],
+                            "products": [{"product": stripe.Price.retrieve(list(PLANS.values())[0]).product,
+                                          "prices": list(PLANS.values())}],
+                        },
+                    },
+                )
+                session = stripe.billing_portal.Session.create(
+                    customer=customer_id, return_url=req.return_url, configuration=cfg.id,
+                )
+            else:
+                raise HTTPException(502, f"Stripe error: {e.user_message or str(e)}")
+        return {"portal_url": session.url}
+
     return router
 
 
@@ -159,17 +231,26 @@ async def handle_stripe_webhook(request: Request, db) -> dict:
         subscription_id = obj.get("subscription")
 
         if t == "checkout.session.completed":
+            customer_id = obj.get("customer")
+            user_id_meta = (obj.get("metadata") or {}).get("user_id")
             await db.payment_transactions.update_one(
                 {"session_id": obj_id, "payment_status": {"$ne": "paid"}},
                 {"$set": {
                     "status": "completed",
                     "payment_status": payment_status or "paid",
                     "stripe_subscription_id": subscription_id,
+                    "stripe_customer_id": customer_id,
                     "amount_total": obj.get("amount_total"),
                     "currency": obj.get("currency"),
                     "updated_at": now,
                 }},
             )
+            # Link the Stripe customer back to our user record for portal access.
+            if user_id_meta and customer_id:
+                await db.users.update_one(
+                    {"user_id": user_id_meta},
+                    {"$set": {"stripe_customer_id": customer_id}},
+                )
         elif t == "checkout.session.async_payment_succeeded":
             await db.payment_transactions.update_one(
                 {"session_id": obj_id},

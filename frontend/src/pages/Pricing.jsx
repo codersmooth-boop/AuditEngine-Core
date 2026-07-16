@@ -1,5 +1,7 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../lib/auth";
+import { getBillingTier, createPortalSession } from "../lib/api";
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -74,8 +76,24 @@ const MAX_ROWS = Math.max(...PLANS.map((p) => p.features.length));
 
 export default function Pricing() {
   const nav = useNavigate();
+  const { user } = useAuth();
   const [busy, setBusy] = useState(null);
   const [err, setErr] = useState("");
+  const [tier, setTier] = useState(null); // {active, tier, plan_id}
+
+  useEffect(() => {
+    if (!user) { setTier({ active: false, tier: "free", plan_id: null }); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const t = await getBillingTier();
+        if (!cancelled) setTier(t);
+      } catch {
+        if (!cancelled) setTier({ active: false, tier: "free", plan_id: null });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
 
   async function subscribe(plan_id) {
     setBusy(plan_id);
@@ -84,11 +102,27 @@ export default function Pricing() {
       const res = await fetch(`${API}/api/payments/checkout`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan_id, origin_url: window.location.origin }),
+        body: JSON.stringify({
+          plan_id,
+          origin_url: window.location.origin,
+          user_id: user?.user_id || null,
+        }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       window.location.href = data.checkout_url;
+    } catch (e) {
+      setErr(String(e));
+      setBusy(null);
+    }
+  }
+
+  async function openPortal() {
+    setBusy("portal");
+    setErr("");
+    try {
+      const { portal_url } = await createPortalSession(`${window.location.origin}/pricing`);
+      window.location.href = portal_url;
     } catch (e) {
       setErr(String(e));
       setBusy(null);
@@ -134,6 +168,28 @@ export default function Pricing() {
           {err && (
             <div className="ae-border-strong px-4 py-3 mono text-xs text-[#FF0000] mb-8" data-testid="pricing-error">
               {err}
+            </div>
+          )}
+
+          {/* Active subscription banner — only visible when the caller is
+              already provisioned on a paid tier. Zero fluff, one command. */}
+          {tier?.active && (
+            <div className="ae-border-strong mb-10 grid grid-cols-[1fr_auto]" data-testid="pricing-active-banner">
+              <div className="px-6 py-5 border-r-[0.5px] border-[#2A2A2A]">
+                <div className="mono text-[10px] tracking-widest text-[#00FF41]">// ACTIVE PROVISION</div>
+                <div className="mono text-sm text-[#E8E8E8] mt-2">
+                  Current tier · <span className="text-[#00FF41]">{tier.plan_id?.toUpperCase().replace("_", " · ") || "—"}</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={openPortal}
+                disabled={busy !== null}
+                data-testid="pricing-manage-btn"
+                className="mono text-[11px] tracking-widest px-6 border-l-[0.5px] border-[#00FF41] text-[#00FF41] hover:bg-[#00FF41] hover:text-black disabled:opacity-40"
+              >
+                {busy === "portal" ? "OPENING PORTAL…" : "▸ MANAGE SUBSCRIPTION"}
+              </button>
             </div>
           )}
 
@@ -198,7 +254,10 @@ export default function Pricing() {
 
             {/* CTA row */}
             <div className="grid grid-cols-3">
-              {PLANS.map((p, idx) => (
+              {PLANS.map((p, idx) => {
+                const isOwned = tier?.active && tier.plan_id === p.plan_id;
+                const isOtherOwned = tier?.active && tier.plan_id !== p.plan_id && p.plan_id !== "enterprise";
+                return (
                 <div
                   key={`${p.plan_id}-cta`}
                   className={`px-6 py-6 ${idx < 2 ? "border-r-[0.5px] border-[#2A2A2A]" : ""} ${p.featured ? "bg-[#050505]" : ""}`}
@@ -213,6 +272,26 @@ export default function Pricing() {
                     >
                       {p.cta}
                     </a>
+                  ) : isOwned ? (
+                    <button
+                      type="button"
+                      onClick={openPortal}
+                      disabled={busy !== null}
+                      data-testid={`pricing-cta-${p.plan_id}`}
+                      className="w-full mono text-[11px] tracking-widest py-3 px-4 border-[0.5px] border-[#00FF41] text-[#00FF41] hover:bg-[#00FF41] hover:text-black transition-colors disabled:opacity-40"
+                    >
+                      {busy === "portal" ? "OPENING PORTAL…" : "▸ PROVISIONED · MANAGE"}
+                    </button>
+                  ) : isOtherOwned ? (
+                    <button
+                      type="button"
+                      onClick={openPortal}
+                      disabled={busy !== null}
+                      data-testid={`pricing-cta-${p.plan_id}`}
+                      className="w-full mono text-[11px] tracking-widest py-3 px-4 border-[0.5px] border-[#808080] text-[#808080] hover:text-white hover:border-white transition-colors disabled:opacity-40"
+                    >
+                      ▸ SWITCH VIA PORTAL
+                    </button>
                   ) : (
                     <button
                       type="button"
@@ -229,7 +308,8 @@ export default function Pricing() {
                     </button>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
