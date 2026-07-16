@@ -1,0 +1,38 @@
+{
+  "summary": "Adversarial testing of Regulator Sandbox module + TTL migration. 17/18 tests pass. 1 pre-existing bug found in /api/auth/session (unrelated to sandbox). All sandbox core requirements verified: auth (401 missing/invalid/expired), K-anonymity=5 (all buckets audited >=5), rate limit=10/min per key with per-key isolation, zero PII in payloads, registry_master_root matches SHA-256 of sorted snapshot.merkle_root, TTL index on user_sessions.expires_at with expireAfterSeconds=0 and no duplicate non-TTL index, session expires_at stored as BSON date, idempotent key issuance.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/auth/session",
+        "issue": "Returns 500 (unhandled JSONDecodeError from `await request.json()` at server.py:169) when body is missing/empty. Should return 400/422. Fix: wrap in try/except or use a Pydantic body model.",
+        "priority": "MEDIUM"
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_regulator_sandbox.py",
+    "/app/test_reports/pytest/regulator_sandbox.xml"
+  ],
+  "action_items": [
+    "Fix POST /api/auth/session to reject missing/invalid JSON bodies with 400/422 instead of 500 (unhandled JSONDecodeError at server.py:169)."
+  ],
+  "critical_code_review_comments": [
+    "Rate limiter is in-process only (defaultdict/deque) — will not enforce limits across multiple uvicorn workers/pods. Documented as accepted limitation; consider Redis-backed limiter before institutional rollout.",
+    "regulator_sandbox.issue_key stores expires_at as ISO string, but the TTL migration in server.py only applies to user_sessions. If a TTL index is ever desired on regulator_keys.expires_at, migrate to BSON date.",
+    "server.py at 871 lines exceeds the >700 recommended threshold — consider splitting auth/session, public registry, and audits into separate routers.",
+    "In regulator_sandbox._authorize, `key_hash` derivation via SHA-256 with no HMAC/salt is fine for lookup but not for storage; consider slower KDF if threat model includes DB dump.",
+    "Rate limit dict `_RATE_BUCKETS` grows unbounded (never purges empty deques for unused keys) — small leak; add periodic sweep for production."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_regulator_sandbox.py"
+  ],
+  "success_rate": {"backend": "94% (17/18)", "frontend": "skipped"},
+  "test_credentials": "Regulator keys minted per-test via CLI (python issue_regulator_key.py). All TEST_* keys/orgs cleaned from DB.",
+  "seed_data_creation": "None persisted — all test-created regulator_keys deleted post-run. TEST_session_* doc created and immediately deleted in TestSessionBSONDate.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Regulator Sandbox fully verified against locked config (TTL=30, Registry Master Root in payload, 10 req/min per key, K_ANON=5). Only outstanding backend issue is auth/session 500 on empty body (server.py:169). CLI mints keys with expires_at as ISO string, not BSON date — TTL only on user_sessions currently.",
+  "rca of the issue": "server.py POST /api/auth/session calls `body = await request.json()` without try/except and without a Pydantic body model. When client sends an empty body, starlette raises json.JSONDecodeError which is not caught, resulting in a 500. Reproduction: `curl -X POST $URL/api/auth/session` → 500 Internal Server Error. Mitigation: change signature to `async def create_session(payload: SessionRequest)` with a Pydantic model, or wrap `await request.json()` in try/except JSONDecodeError → raise HTTPException(400, 'Invalid JSON body')."
+}

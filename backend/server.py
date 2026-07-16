@@ -17,6 +17,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from llm_service import analyze_documents
 from pdf_service import build_audit_pdf, build_board_brief_pdf, build_snapshot_pdf
 from file_extractor import extract_text_from_file
+from regulator_sandbox import make_router as make_regulator_router, issue_key as issue_regulator_key
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -195,10 +196,11 @@ async def create_session(request: Request, response: Response):
 
     session_token = data["session_token"]
     expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+    # Stored as BSON date so MongoDB TTL index can auto-expire the row.
     await db.user_sessions.insert_one({
         "user_id": user_id,
         "session_token": session_token,
-        "expires_at": expires_at.isoformat(),
+        "expires_at": expires_at,
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
     response.set_cookie(
@@ -802,6 +804,7 @@ async def public_verify(request: Request, merkle_root: str):
 
 
 app.include_router(api_router)
+app.include_router(make_regulator_router(db))
 
 app.add_middleware(
     CORSMiddleware,
@@ -816,6 +819,34 @@ app.add_middleware(
 async def _create_indexes():
     """Idempotent index creation for hot paths."""
     try:
+        # One-time migration: coerce any legacy string `expires_at` values to
+        # BSON dates so the TTL index below can actually reap them.
+        legacy = await db.user_sessions.find(
+            {"expires_at": {"$type": "string"}},
+            {"_id": 1, "session_token": 1, "expires_at": 1},
+        ).to_list(10000)
+        for row in legacy:
+            try:
+                dt = datetime.fromisoformat(row["expires_at"])
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                await db.user_sessions.update_one({"_id": row["_id"]}, {"$set": {"expires_at": dt}})
+            except Exception:
+                # Malformed row — nuke it; a fresh login will replace.
+                await db.user_sessions.delete_one({"_id": row["_id"]})
+
+        # If a prior non-TTL index exists on expires_at, drop it so the TTL variant can be created.
+        try:
+            existing = await db.user_sessions.index_information()
+            for name, spec in existing.items():
+                if name == "_id_":
+                    continue
+                keys = spec.get("key") or []
+                if len(keys) == 1 and keys[0][0] == "expires_at" and spec.get("expireAfterSeconds") is None:
+                    await db.user_sessions.drop_index(name)
+        except Exception as e:
+            logger.warning(f"Could not inspect/drop legacy expires_at index: {e}")
+
         await db.snapshots.create_index("merkle_root", unique=True)
         await db.snapshots.create_index([("workspace_id_hashed", 1), ("reporting_year", 1)])
         await db.snapshots.create_index([("generated_at", -1)])
@@ -825,7 +856,11 @@ async def _create_indexes():
         await db.audits.create_index([("user_id", 1), ("reporting_year", 1), ("status", 1)])
         await db.audits.create_index("audit_id", unique=True)
         await db.user_sessions.create_index("session_token", unique=True)
-        logger.info("Indexes ensured on hot-path collections")
+        # TTL index — MongoDB reaps rows whose expires_at is in the past.
+        await db.user_sessions.create_index("expires_at", expireAfterSeconds=0)
+        await db.regulator_keys.create_index("key_hash", unique=True)
+        await db.regulator_keys.create_index("expires_at")
+        logger.info("Indexes ensured on hot-path collections (incl. TTL on user_sessions.expires_at)")
     except Exception as e:
         logger.warning(f"Index creation warning (may pre-exist): {e}")
 
