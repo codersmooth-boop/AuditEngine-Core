@@ -156,33 +156,36 @@ def make_router(db, get_current_user):
             raise HTTPException(400, "No active subscription — nothing to manage")
         _load_stripe_key()
         try:
-            session = stripe.billing_portal.Session.create(
-                customer=customer_id,
-                return_url=req.return_url,
-            )
-        except stripe.error.InvalidRequestError as e:
-            msg = (e.user_message or str(e)).lower()
-            if "no configuration" in msg or "default configuration" in msg:
-                # Auto-provision a minimal portal configuration for this account.
-                cfg = stripe.billing_portal.Configuration.create(
-                    business_profile={"headline": "AuditEngine · Manage subscription"},
-                    features={
-                        "customer_update": {"enabled": True, "allowed_updates": ["email", "address"]},
-                        "invoice_history": {"enabled": True},
-                        "payment_method_update": {"enabled": True},
-                        "subscription_cancel": {"enabled": True, "mode": "at_period_end"},
-                        "subscription_update": {
-                            "enabled": True, "default_allowed_updates": ["price"],
-                            "products": [{"product": stripe.Price.retrieve(list(PLANS.values())[0]).product,
-                                          "prices": list(PLANS.values())}],
-                        },
-                    },
-                )
+            try:
                 session = stripe.billing_portal.Session.create(
-                    customer=customer_id, return_url=req.return_url, configuration=cfg.id,
+                    customer=customer_id,
+                    return_url=req.return_url,
                 )
-            else:
-                raise HTTPException(502, f"Stripe error: {e.user_message or str(e)}")
+            except stripe.error.InvalidRequestError as e:
+                msg = (e.user_message or str(e)).lower()
+                if "no configuration" in msg or "default configuration" in msg:
+                    # Auto-provision a minimal portal configuration for this account.
+                    cfg = stripe.billing_portal.Configuration.create(
+                        business_profile={"headline": "AuditEngine · Manage subscription"},
+                        features={
+                            "customer_update": {"enabled": True, "allowed_updates": ["email", "address"]},
+                            "invoice_history": {"enabled": True},
+                            "payment_method_update": {"enabled": True},
+                            "subscription_cancel": {"enabled": True, "mode": "at_period_end"},
+                            "subscription_update": {
+                                "enabled": True, "default_allowed_updates": ["price"],
+                                "products": [{"product": stripe.Price.retrieve(list(PLANS.values())[0]).product,
+                                              "prices": list(PLANS.values())}],
+                            },
+                        },
+                    )
+                    session = stripe.billing_portal.Session.create(
+                        customer=customer_id, return_url=req.return_url, configuration=cfg.id,
+                    )
+                else:
+                    raise
+        except stripe.error.StripeError as e:
+            raise HTTPException(502, f"Stripe error: {e.user_message or str(e)}")
         return {"portal_url": session.url}
 
     return router

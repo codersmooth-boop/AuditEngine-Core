@@ -60,6 +60,14 @@ Build a high-precision, enterprise-grade ESG Compliance Intelligence Platform ("
   - `load_dotenv(..., override=True)` in both `server.py` and `stripe_billing.py` — defence against stale shell env clobbering.
   - Frontend `/pricing` rewritten to **PRICING SPECIFICATIONS** spec-grid (PART 2): header `AUDITENGINE // PRICING SPECIFICATIONS`, H1 `Deterministic billing. Fixed-precision tiers.`, strict aligned feature rows across all three tiers, no marketing copy. Exact feature list per user spec. Email obfuscation preserved (char-code assembly at click-time).
   - Verification: `stripe.checkout.Session.list()` on user's key confirms sessions are on `acct_1TtrBl2EF5EE1c01` with correct price IDs and amounts.
+- **2026-07-16 (fork · unified journey)** — **Provisioning UX loop closed**:
+  - Backend: `GET /api/payments/tier` (auth) reads the user's latest paid `payment_transactions` row and verifies the live `stripe_subscription_id` against Stripe (`status ∈ {active, trialing, past_due}`). Returns `{tier, active, plan_id, stripe_customer_id, stripe_status}`.
+  - Backend: `POST /api/payments/portal` (auth) creates a Stripe Billing Portal session for the caller. Auto-provisions a portal Configuration on-the-fly if the account has none. Rejects free users with 400.
+  - Webhook enrichment: `checkout.session.completed` now also writes `stripe_customer_id` onto the caller's `users` row (from `session.customer` + `metadata.user_id`), so the portal endpoint can find them next time.
+  - Frontend: new `<ProvisionAccessLink/>` component in the Dashboard header — reads `/api/payments/tier` on mount; free → routes to `/pricing`; paid → opens Stripe Portal via `/api/payments/portal`. Green when paid.
+  - Frontend `/pricing`: auth-aware. Sends `user_id` on checkout. When caller is on an active tier: renders "ACTIVE PROVISION" banner, and swaps per-tier CTAs — owned plan → `▸ PROVISIONED · MANAGE`; other paid plans → `▸ SWITCH VIA PORTAL`. Both route to Portal.
+- **Testing (iter 6)**: 36/36 pass (11 new + 25 regression). Real Stripe test-mode Customer+Subscription created + torn down cleanly. Zero critical, zero minor.
+
 - **2026-07-16 (fork · webhook activation)** — **Financial loop closed**:
   - `STRIPE_WEBHOOK_SECRET` set in `.env`. Backend restarted; secret loaded via `load_dotenv(override=True)`.
   - `handle_stripe_webhook` upgraded to dual-mode: Snapshot payloads persist directly; Thin payloads (`_is_thin` = ≤3 keys or missing `payment_status`) trigger a `Session.retrieve()` / `Charge.retrieve()` enrichment before DB writes. Handles `checkout.session.{completed,async_payment_succeeded,async_payment_failed,expired}` and `charge.refunded`. Unhandled types still 200-OK so Stripe does not retry.
