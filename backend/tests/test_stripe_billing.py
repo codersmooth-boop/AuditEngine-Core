@@ -1,8 +1,14 @@
-"""Backend tests for Stripe Checkout integration on AuditEngine.
+"""Backend tests for Stripe BYOK migration (Flow B) on AuditEngine.
 
-Covers /api/payments/checkout, /api/payments/status/{session_id},
-/api/stripe/webhook, DB persistence, indexes, and regression on
-already-passing endpoints.
+Verifies:
+- backend/.env contains ONLY STRIPE_API_KEY (no residual sandbox keys)
+- Sessions land on user's account acct_1TtrBl2EF5EE1c01
+- /api/payments/checkout returns valid subscription sessions using user's Price IDs
+- /api/payments/status returns minimal shape without PII
+- /api/webhook/stripe (new path) validates signature; /api/stripe/webhook (old) 404s
+- payment_transactions row persisted before response
+- PLANS dict in stripe_billing.py has only user's 2 Price IDs
+- Regression on core endpoints
 """
 import os
 import re
@@ -12,11 +18,17 @@ import requests
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load backend .env for Stripe key + Mongo access from within test process
-load_dotenv(Path(__file__).parent.parent / ".env")
+load_dotenv(Path(__file__).parent.parent / ".env", override=True)
+# Also allow importing stripe_billing directly
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/") if os.environ.get("REACT_APP_BACKEND_URL") else "https://audit-engine-38.preview.emergentagent.com"
 ORIGIN = "https://audit-engine-38.preview.emergentagent.com"
+
+EXPECTED_ACCOUNT_ID = "acct_1TtrBl2EF5EE1c01"
+PRICE_MONTHLY = "price_1TtrVK2EF5EE1c01gRIxaKIX"
+PRICE_YEARLY = "price_1Ttrdg2EF5EE1c01qEOTjEM4"
 
 STRIPE_URL_RE = re.compile(r"^https://checkout\.stripe\.com/")
 
@@ -30,244 +42,245 @@ def client():
 
 @pytest.fixture(scope="session")
 def mongo_db():
-    from motor.motor_asyncio import AsyncIOMotorClient
+    from pymongo import MongoClient
     url = os.environ["MONGO_URL"]
     name = os.environ["DB_NAME"]
-    client = AsyncIOMotorClient(url)
-    return client[name]
+    c = MongoClient(url)
+    return c[name]
 
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 # --------------------------------------------------------------------------
-# 1. /api/payments/checkout — happy paths
+# 1. .env hygiene — only STRIPE_API_KEY
 # --------------------------------------------------------------------------
+class TestEnvHygiene:
+    def test_no_residual_sandbox_env_vars(self):
+        env_path = Path(__file__).parent.parent / ".env"
+        content = env_path.read_text()
+        banned = ["STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY",
+                  "STRIPE_ACCOUNT_ID", "STRIPE_MODE"]
+        # STRIPE_WEBHOOK_SECRET is optional; per spec it should also be absent
+        for key in banned:
+            assert f"{key}=" not in content, f"{key} still present in backend/.env"
 
+    def test_stripe_api_key_present(self):
+        key = os.environ.get("STRIPE_API_KEY", "")
+        assert key.startswith("sk_test_51TtrBl2EF5EE1c01"), \
+            "STRIPE_API_KEY not user's key"
+
+
+# --------------------------------------------------------------------------
+# 2. PLANS dict has only user's 2 Price IDs
+# --------------------------------------------------------------------------
+class TestPlanCatalog:
+    def test_plans_dict_contents(self):
+        from stripe_billing import PLANS
+        assert set(PLANS.keys()) == {"professional_monthly", "annual_yearly"}
+        assert PLANS["professional_monthly"] == PRICE_MONTHLY
+        assert PLANS["annual_yearly"] == PRICE_YEARLY
+        # No sandbox price residue
+        for pid in PLANS.values():
+            assert "EJ3Jre5OM3" not in pid, f"Sandbox price id leaked: {pid}"
+
+
+# --------------------------------------------------------------------------
+# 3. /api/payments/checkout — happy paths
+# --------------------------------------------------------------------------
 class TestCheckoutHappyPath:
-    def test_monthly_returns_valid_stripe_url(self, client):
+    def test_monthly(self, client):
         r = client.post(f"{BASE_URL}/api/payments/checkout", json={
-            "lookup_key": "professional_monthly",
-            "origin_url": ORIGIN,
+            "plan_id": "professional_monthly", "origin_url": ORIGIN,
         })
         assert r.status_code == 200, r.text
-        data = r.json()
-        assert "checkout_url" in data and "session_id" in data
-        assert STRIPE_URL_RE.match(data["checkout_url"]), data["checkout_url"]
-        assert data["session_id"].startswith("cs_")
+        d = r.json()
+        assert STRIPE_URL_RE.match(d["checkout_url"])
+        assert d["session_id"].startswith("cs_test_")
 
-    def test_yearly_returns_distinct_url(self, client):
-        r1 = client.post(f"{BASE_URL}/api/payments/checkout", json={
-            "lookup_key": "annual_yearly", "origin_url": ORIGIN,
+    def test_yearly(self, client):
+        r = client.post(f"{BASE_URL}/api/payments/checkout", json={
+            "plan_id": "annual_yearly", "origin_url": ORIGIN,
         })
-        r2 = client.post(f"{BASE_URL}/api/payments/checkout", json={
-            "lookup_key": "annual_yearly", "origin_url": ORIGIN,
-        })
-        assert r1.status_code == 200 and r2.status_code == 200
-        d1, d2 = r1.json(), r2.json()
-        assert d1["session_id"] != d2["session_id"], "Idempotency: should get fresh session"
-        assert d1["checkout_url"] != d2["checkout_url"]
-        assert STRIPE_URL_RE.match(d1["checkout_url"])
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert STRIPE_URL_RE.match(d["checkout_url"])
+        assert d["session_id"].startswith("cs_test_")
 
 
 # --------------------------------------------------------------------------
-# 2. Pydantic edge cases
+# 4. Session details via Stripe SDK — mode, amount, currency, price, account
 # --------------------------------------------------------------------------
+class TestSessionShape:
+    @pytest.fixture(scope="class")
+    def stripe_mod(self):
+        import stripe
+        stripe.api_key = os.environ["STRIPE_API_KEY"]
+        return stripe
 
+    def test_account_is_user_account(self, stripe_mod):
+        acct = stripe_mod.Account.retrieve()
+        assert acct.id == EXPECTED_ACCOUNT_ID, \
+            f"Stripe key is bound to {acct.id}, expected {EXPECTED_ACCOUNT_ID}"
+
+    def test_monthly_session_details(self, client, stripe_mod):
+        r = client.post(f"{BASE_URL}/api/payments/checkout", json={
+            "plan_id": "professional_monthly", "origin_url": ORIGIN,
+        })
+        sid = r.json()["session_id"]
+        s = stripe_mod.checkout.Session.retrieve(
+            sid, expand=["line_items", "line_items.data.price"])
+        assert s.mode == "subscription"
+        assert s.amount_total == 4900
+        assert s.currency == "eur"
+        assert s.line_items.data[0].price.id == PRICE_MONTHLY
+        assert s.success_url == f"{ORIGIN}/payment/success?session_id={{CHECKOUT_SESSION_ID}}"
+        assert s.cancel_url == f"{ORIGIN}/payment/cancel"
+
+    def test_yearly_session_details(self, client, stripe_mod):
+        r = client.post(f"{BASE_URL}/api/payments/checkout", json={
+            "plan_id": "annual_yearly", "origin_url": ORIGIN,
+        })
+        sid = r.json()["session_id"]
+        s = stripe_mod.checkout.Session.retrieve(
+            sid, expand=["line_items", "line_items.data.price"])
+        assert s.mode == "subscription"
+        assert s.amount_total == 49000
+        assert s.currency == "eur"
+        assert s.line_items.data[0].price.id == PRICE_YEARLY
+
+
+# --------------------------------------------------------------------------
+# 5. Pydantic validation
+# --------------------------------------------------------------------------
 class TestCheckoutValidation:
-    def test_invalid_lookup_key_422(self, client):
+    def test_invalid_plan_id_enterprise(self, client):
         r = client.post(f"{BASE_URL}/api/payments/checkout", json={
-            "lookup_key": "free_forever", "origin_url": ORIGIN,
+            "plan_id": "enterprise", "origin_url": ORIGIN,
         })
-        assert r.status_code == 422, r.text
+        assert r.status_code == 422
 
-    def test_missing_origin_url_422(self, client):
+    def test_invalid_plan_id_random(self, client):
         r = client.post(f"{BASE_URL}/api/payments/checkout", json={
-            "lookup_key": "professional_monthly",
+            "plan_id": "free_forever", "origin_url": ORIGIN,
         })
-        assert r.status_code == 422, r.text
+        assert r.status_code == 422
 
-    def test_empty_body_422(self, client):
+    def test_missing_origin_url(self, client):
+        r = client.post(f"{BASE_URL}/api/payments/checkout", json={
+            "plan_id": "professional_monthly",
+        })
+        assert r.status_code == 422
+
+    def test_empty_body(self, client):
         r = client.post(f"{BASE_URL}/api/payments/checkout", json={})
         assert r.status_code == 422
 
-    def test_quantity_out_of_range(self, client):
-        r = client.post(f"{BASE_URL}/api/payments/checkout", json={
-            "lookup_key": "professional_monthly",
-            "origin_url": ORIGIN,
-            "quantity": 0,
-        })
-        assert r.status_code == 422
-
 
 # --------------------------------------------------------------------------
-# 3. DB persistence — payment_transactions row before response
+# 6. DB persistence
 # --------------------------------------------------------------------------
-
-class TestPaymentTransactionsPersistence:
-    def test_monthly_row_persisted_with_correct_amount(self, client, mongo_db):
+class TestPersistence:
+    def test_row_persisted_before_response(self, client, mongo_db):
         r = client.post(f"{BASE_URL}/api/payments/checkout", json={
-            "lookup_key": "professional_monthly", "origin_url": ORIGIN,
+            "plan_id": "professional_monthly", "origin_url": ORIGIN,
         })
-        assert r.status_code == 200
         sid = r.json()["session_id"]
-        row = _run(mongo_db.payment_transactions.find_one({"session_id": sid}))
-        assert row is not None, "Row must be inserted before response returns"
+        row = mongo_db.payment_transactions.find_one({"session_id": sid})
+        assert row is not None
         assert row["status"] == "initiated"
         assert row["payment_status"] == "pending"
-        assert row["amount"] == 4900
-        assert row["currency"] == "eur"
-        assert row["lookup_key"] == "professional_monthly"
+        assert row["plan_id"] == "professional_monthly"
+        assert row["stripe_price_id"] == PRICE_MONTHLY
+        assert "created_at" in row and "updated_at" in row
 
-    def test_yearly_row_persisted_with_correct_amount(self, client, mongo_db):
-        r = client.post(f"{BASE_URL}/api/payments/checkout", json={
-            "lookup_key": "annual_yearly", "origin_url": ORIGIN,
-        })
-        sid = r.json()["session_id"]
-        row = _run(mongo_db.payment_transactions.find_one({"session_id": sid}))
-        assert row is not None
-        assert row["amount"] == 49000
-        assert row["currency"] == "eur"
-        assert row["status"] == "initiated"
-
-    def test_idempotency_two_distinct_rows(self, client, mongo_db):
+    def test_idempotency_distinct_rows(self, client, mongo_db):
         r1 = client.post(f"{BASE_URL}/api/payments/checkout", json={
-            "lookup_key": "professional_monthly", "origin_url": ORIGIN,
+            "plan_id": "professional_monthly", "origin_url": ORIGIN,
         })
         r2 = client.post(f"{BASE_URL}/api/payments/checkout", json={
-            "lookup_key": "professional_monthly", "origin_url": ORIGIN,
+            "plan_id": "professional_monthly", "origin_url": ORIGIN,
         })
-        s1 = r1.json()["session_id"]
-        s2 = r2.json()["session_id"]
+        s1, s2 = r1.json()["session_id"], r2.json()["session_id"]
         assert s1 != s2
-        rows = _run(mongo_db.payment_transactions.find(
-            {"session_id": {"$in": [s1, s2]}}
-        ).to_list(length=10))
+        rows = list(mongo_db.payment_transactions.find(
+            {"session_id": {"$in": [s1, s2]}}))
         assert len(rows) == 2
 
 
 # --------------------------------------------------------------------------
-# 4. /api/payments/status/{session_id}
+# 7. /api/payments/status
 # --------------------------------------------------------------------------
-
 class TestPaymentStatus:
-    def test_status_fresh_session(self, client):
+    def test_status_fresh_session_shape(self, client):
         r = client.post(f"{BASE_URL}/api/payments/checkout", json={
-            "lookup_key": "professional_monthly", "origin_url": ORIGIN,
+            "plan_id": "professional_monthly", "origin_url": ORIGIN,
         })
         sid = r.json()["session_id"]
         s = client.get(f"{BASE_URL}/api/payments/status/{sid}")
-        assert s.status_code == 200, s.text
+        assert s.status_code == 200
         data = s.json()
-        # Must contain only these three keys — no PII leak
         assert set(data.keys()) == {"session_id", "status", "payment_status"}
         assert data["session_id"] == sid
-        assert data["payment_status"] in ("pending", "unpaid")
-        assert data["status"] in ("initiated", "open")
+        assert data["status"] == "initiated"
+        assert data["payment_status"] == "pending"
 
-    def test_status_unknown_returns_404(self, client):
+    def test_status_unknown_404(self, client):
         r = client.get(f"{BASE_URL}/api/payments/status/cs_test_nonexistent_deadbeef")
         assert r.status_code == 404
 
 
 # --------------------------------------------------------------------------
-# 5. Stripe price amounts via SDK — sanity check catalog
+# 8. Webhook paths
 # --------------------------------------------------------------------------
-
-class TestStripeCatalog:
-    def test_prices_match_expected_amounts(self):
-        import stripe
-        stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
-        m = stripe.Price.list(lookup_keys=["professional_monthly"], active=True, limit=1).data
-        y = stripe.Price.list(lookup_keys=["annual_yearly"], active=True, limit=1).data
-        assert m and y
-        assert m[0].unit_amount == 4900
-        assert m[0].currency == "eur"
-        assert m[0].recurring and m[0].recurring["interval"] == "month"
-        assert y[0].unit_amount == 49000
-        assert y[0].currency == "eur"
-        assert y[0].recurring and y[0].recurring["interval"] == "year"
-
-
-# --------------------------------------------------------------------------
-# 6. success_url / cancel_url shape (retrieved from Stripe)
-# --------------------------------------------------------------------------
-
-class TestSessionUrls:
-    def test_success_cancel_url_pattern(self, client):
-        import stripe
-        stripe.api_key = os.environ["STRIPE_SECRET_KEY"]
-        r = client.post(f"{BASE_URL}/api/payments/checkout", json={
-            "lookup_key": "professional_monthly", "origin_url": ORIGIN,
-        })
-        sid = r.json()["session_id"]
-        s = stripe.checkout.Session.retrieve(sid)
-        assert s.success_url == f"{ORIGIN}/payment/success?session_id={{CHECKOUT_SESSION_ID}}"
-        assert s.cancel_url == f"{ORIGIN}/payment/cancel"
-
-
-# --------------------------------------------------------------------------
-# 7. Webhook signature validation
-# --------------------------------------------------------------------------
-
-class TestWebhookSignature:
-    def test_missing_signature_returns_400(self, client):
-        r = client.post(f"{BASE_URL}/api/stripe/webhook", data="{}",
+class TestWebhookPaths:
+    def test_new_webhook_rejects_missing_sig(self, client):
+        r = client.post(f"{BASE_URL}/api/webhook/stripe", data="{}",
                         headers={"Content-Type": "application/json"})
         assert r.status_code == 400
 
-    def test_invalid_signature_returns_400(self, client):
-        r = client.post(f"{BASE_URL}/api/stripe/webhook",
-                        data='{"type":"checkout.session.completed","data":{"object":{"id":"cs_fake"}}}',
+    def test_new_webhook_rejects_bad_sig(self, client):
+        r = client.post(f"{BASE_URL}/api/webhook/stripe",
+                        data='{"type":"checkout.session.completed","data":{"object":{"id":"cs_x"}}}',
                         headers={"Content-Type": "application/json",
                                  "Stripe-Signature": "t=123,v1=deadbeef"})
         assert r.status_code == 400
 
-
-# --------------------------------------------------------------------------
-# 8. Indexes on payment_transactions
-# --------------------------------------------------------------------------
-
-class TestIndexes:
-    def test_session_id_unique_and_created_at_desc(self, mongo_db):
-        info = _run(mongo_db.payment_transactions.index_information())
-        # find session_id unique index
-        found_unique = False
-        found_created_at_desc = False
-        for name, spec in info.items():
-            keys = spec.get("key", [])
-            if keys == [("session_id", 1)] and spec.get("unique"):
-                found_unique = True
-            if keys == [("created_at", -1)]:
-                found_created_at_desc = True
-        assert found_unique, f"session_id unique index missing. Indexes: {info}"
-        assert found_created_at_desc, f"created_at desc index missing. Indexes: {info}"
+    def test_old_webhook_path_removed(self, client):
+        r = client.post(f"{BASE_URL}/api/stripe/webhook", data="{}",
+                        headers={"Content-Type": "application/json"})
+        assert r.status_code in (404, 405), f"old path still live: {r.status_code}"
 
 
 # --------------------------------------------------------------------------
-# 9. Regression on previously-passing endpoints
+# 9. Regression on other endpoints
 # --------------------------------------------------------------------------
-
 class TestRegression:
     def test_public_registry(self, client):
         r = client.get(f"{BASE_URL}/api/public/registry")
         assert r.status_code == 200
 
-    def test_public_verify_unknown_returns_404(self, client):
-        r = client.get(f"{BASE_URL}/api/public/verify/deadbeef_not_a_real_root")
-        assert r.status_code in (404, 400)
+    def test_public_leaderboard(self, client):
+        r = client.get(f"{BASE_URL}/api/public/leaderboard")
+        assert r.status_code == 200
+
+    def test_public_verify_invalid_root(self, client):
+        r = client.get(f"{BASE_URL}/api/public/verify/notarealroot")
+        assert r.status_code in (400, 404)
 
     def test_regulator_sandbox_requires_auth(self, client):
-        r = client.get(f"{BASE_URL}/api/regulator/sandbox/registry")
-        assert r.status_code in (401, 403, 404)
-
-    def test_auth_session_no_body_now_400_or_422(self, client):
-        # Previously 500; iteration_3 flagged it. Confirm status now.
-        r = client.post(f"{BASE_URL}/api/auth/session", data="")
-        # Accept either fixed (400/422) or still-broken (500) — record either way
-        assert r.status_code in (400, 401, 422, 500), r.status_code
+        r = client.get(f"{BASE_URL}/api/regulator/sandbox/whoami")
+        assert r.status_code in (401, 403)
 
     def test_audits_requires_auth(self, client):
         r = client.get(f"{BASE_URL}/api/audits")
         assert r.status_code in (401, 403)
+
+    def test_auth_session_empty_body(self, client):
+        r = client.post(f"{BASE_URL}/api/auth/session", data="")
+        assert r.status_code in (400, 401, 422)

@@ -814,7 +814,7 @@ app.include_router(make_regulator_router(db))
 app.include_router(make_billing_router(db))
 
 
-@app.post("/api/stripe/webhook")
+@app.post("/api/webhook/stripe")
 async def stripe_webhook(request: Request):
     return await handle_stripe_webhook(request, db)
 

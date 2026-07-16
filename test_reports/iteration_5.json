@@ -1,0 +1,32 @@
+{
+  "summary": "Verified Stripe BYOK migration (Flow B) on AuditEngine. 25/25 backend pytest cases pass + full /pricing UI + checkout flow end-to-end. No sandbox residue.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_stripe_billing.py",
+    "/app/test_reports/pytest/stripe_billing.xml"
+  ],
+  "action_items": [
+    "OPTIONAL: purge stale shell env var STRIPE_API_KEY=sk_test_emergent from the container (visible via `env` and /proc/1/environ). The backend supervisor process is unaffected (uses .env correctly) and integration works, but this stale shell var is confusing for any developer running scripts locally.",
+    "OPTIONAL: STRIPE_WEBHOOK_SECRET is not set in backend/.env — webhook currently rejects all payloads with 400 (Webhook secret not configured). Fine for now (tests expected 400), but real Stripe→backend webhooks will fail until it's populated."
+  ],
+  "critical_code_review_comments": [
+    "stripe_billing.py: `stripe.error.StripeError` catch clause uses `e.user_message or str(e)` — user_message can leak internal Stripe messages to clients; consider a generic 502 message + logging the real error server-side.",
+    "server.py load_dotenv does NOT override existing env (default). Combined with the stale shell `STRIPE_API_KEY=sk_test_emergent` still present in the container env, a supervisor restart with different env inheritance rules could silently pick up the wrong key. Recommend `load_dotenv(..., override=True)` in server.py and stripe_billing.py, OR unset the stale shell var at container level.",
+    "Webhook path is registered via a top-level `@app.post` outside the api_router. Works, but inconsistent with routing style; prefer defining it inside stripe_billing.APIRouter for cohesion."
+  ],
+  "updated_files": ["/app/backend/tests/test_stripe_billing.py"],
+  "success_rate": {"backend": "100% (25/25)", "frontend": "100%"},
+  "test_credentials": "Stripe test card 4242 4242 4242 4242 (not exercised — checkout page loads and shows correct product/currency).",
+  "seed_data_creation": "None — checkout POSTs create fresh Stripe test sessions + payment_transactions rows in Mongo (initiated/pending).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "test_stripe_billing.py was rewritten for BYOK Flow B. It uses `load_dotenv(override=True)` because shell env has legacy STRIPE_API_KEY=sk_test_emergent that overrides .env. Uses pymongo (sync) — motor across new event loops broke. Run with `pytest -o addopts=''` to bypass xdist (parallel workers can share stale env before override). Verified account = acct_1TtrBl2EF5EE1c01. Frontend /pricing header, sub-header, features, banned-phrase check, Enterprise href='#contact', and end-to-end click → POST /api/payments/checkout → 200 cs_test_… → navigation to checkout.stripe.com all pass. Old webhook path /api/stripe/webhook returns 404; new /api/webhook/stripe validates signature and returns 400 on invalid/missing sig.",
+  "verification_evidence": {
+    "stripe_account_verified": "acct_1TtrBl2EF5EE1c01 via stripe.Account.retrieve()",
+    "monthly_session": "mode=subscription amount_total=4900 currency=eur price_id=price_1TtrVK2EF5EE1c01gRIxaKIX",
+    "yearly_session": "mode=subscription amount_total=49000 currency=eur price_id=price_1Ttrdg2EF5EE1c01qEOTjEM4",
+    "pricing_ui": "Header 'AUDITENGINE // PRICING SPECIFICATIONS', H1 'Deterministic billing. Fixed-precision tiers.', all 9 required features present, no banned phrases, no 'codersmooth'/'gmail.com' literals in served HTML, Enterprise CTA href='#contact'",
+    "checkout_click_flow": "POST /api/payments/checkout → 200 → checkout_url starts_with https://checkout.stripe.com/ → session_id starts_with cs_test_ → browser navigated to Stripe checkout page (AuditEngine sandbox merchant)."
+  }
+}
