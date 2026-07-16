@@ -40,14 +40,33 @@ Build a high-precision, enterprise-grade ESG Compliance Intelligence Platform ("
   - Frontend `/regulator` page upgraded from static docs to live terminal: key entry (masked), endpoint selector, EXECUTE button, live status pill (200/401/429), formatted response payload viewer.
   - TTL index on `user_sessions.expires_at` with `expireAfterSeconds=0` + migration coercing legacy ISO-string values to BSON Date.
   - `POST /api/auth/session` hardened: returns 400 on empty/invalid JSON bodies (was 500).
-- **Testing**: iteration_3 report — 17/18 pass. Zero critical, zero sandbox regressions. Only pre-existing auth 500-on-empty-body fixed inline.
+- **Testing (iter 3)**: 17/18 pass. Zero critical, zero sandbox regressions.
+
+- **2026-07-16 (this fork, cont.)** — **Stripe Billing** integrated:
+  - Flow A claimable sandbox provisioned (country FI, SMP-eligible). Onboarding URL captured for future account claim.
+  - Catalog seeded via `setup_stripe.py` (idempotent): `professional_monthly` €49/mo, `annual_yearly` €490/yr, tax_code `txcd_10103001` (SaaS).
+  - `POST /api/payments/checkout` — validates lookup_key against pydantic pattern, creates Stripe Session with `managed_payments={enabled: true}` (falls back to Stripe Tax + billing address if not eligible), persists row in `payment_transactions` before returning.
+  - `GET /api/payments/status/{session_id}` — polls Stripe as webhook fallback, updates DB idempotently, returns only `{session_id, status, payment_status}` (no PII).
+  - `POST /api/stripe/webhook` — signature-verified; handles `checkout.session.completed`, `async_payment_succeeded/failed`, `expired`, `charge.refunded`.
+  - Frontend `/pricing` — three pillars (Professional / Annual / Enterprise), Annual highlighted `#00FF41` "ACTIVE · RECOMMENDED".
+  - Enterprise "CONTACT FOR QUOTE" — email `codersmooth@gmail.com` obfuscated as `String.fromCharCode(...)` arrays, assembled only on user click. HTML source contains ZERO email/`gmail`/`codersmooth` literals (verified).
+  - `/payment/success` — polls status 8× at 2s, renders receipt card with session ID + status pill; `/payment/cancel` explains no-charge state and returns to /pricing.
+  - Mongo `payment_transactions` collection with unique index on `session_id` + descending index on `created_at`.
+- **Testing (iter 4)**: 21/21 pass. Zero critical, zero minor. All webhook signature/idempotency/pydantic/DB-row-before-return semantics verified.
+
+## Sandbox key handoff
+- Onboarding URL (share with user, one click to convert to real account): captured in fork context.
+- Stripe test card: `4242 4242 4242 4242`, any future expiry, any CVC.
+- Tax mode selected: **Stripe manages everything including tax and compliance (+3.5% per transaction)** — available in ~80 countries. Alternatives on request: Stripe calculates tax only (+0.5%) or DIY (no tax help).
 
 ## Prioritized Backlog
 - **P1** — Redis-backed rate limiter for horizontal scale-out (currently in-process memory).
-- **P1** — Modularize server.py (871 lines) into routers: auth, ledger, public, regulator.
+- **P1** — Modularize server.py (876 lines) into routers: auth, ledger, public, regulator, stripe.
+- **P1** — TTL / cleanup on `payment_transactions` rows stuck in `initiated`/`pending` state (abandoned carts).
 - **P2** — Background task for Snapshot PDF generation (currently synchronous).
 - **P2** — TTL index on `regulator_keys.expires_at` (currently expires_at stored as ISO string; migrate to BSON date first).
 - **P2** — Periodic sweep of empty `_RATE_BUCKETS` deques (small memory leak on unused keys).
+- **P2** — Fail-fast on missing `STRIPE_SECRET_KEY` at import (currently falls back to `sk_test_emergent`).
 - **P3** — HMAC/salted KDF for regulator key hashing (currently plain SHA-256 for lookup).
 
 ## API Surface (excerpt)
