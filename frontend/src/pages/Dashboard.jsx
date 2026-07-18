@@ -147,7 +147,7 @@ export default function Dashboard() {
       <div className="px-8 py-6">
         <div className="grid grid-cols-12 mono text-[10px] text-[#808080] tracking-widest py-3 border-b-[0.5px] border-[#2A2A2A]">
           <div className="col-span-1">#</div>
-          <div className="col-span-3">CLIENT</div>
+          <div className="col-span-2">CLIENT</div>
           <div className="col-span-3">NACE SECTOR</div>
           <div className="col-span-1">YEAR</div>
           <div className="col-span-1">SCORE</div>
@@ -173,7 +173,7 @@ export default function Dashboard() {
             className="grid grid-cols-12 mono text-xs items-center py-4 border-b-[0.5px] border-[#1A1A1A] hover:bg-[#0D0D0D] cursor-pointer transition-colors"
           >
             <div className="col-span-1 text-[#808080]">{String(i + 1).padStart(3, "0")}</div>
-            <div className="col-span-3 sans text-[#E8E8E8] text-sm">{a.client_name}</div>
+            <div className="col-span-2 sans text-[#E8E8E8] text-sm truncate pr-3">{a.client_name}</div>
             <div className="col-span-3 text-[#808080] truncate pr-4">{a.nace_code} · {a.nace_name}</div>
             <div className="col-span-1 text-[#E8E8E8]">{a.reporting_year}</div>
             <div className="col-span-1 text-[#E8E8E8]">{a.compliance_score ?? "—"}</div>

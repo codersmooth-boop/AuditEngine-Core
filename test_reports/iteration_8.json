@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 8 hyper-user polish patches verified. PATCH A (dashboard 12-col grid math) PASSES — source-grep and live render both confirm 1+2+3+1+1+1+2+1=12 on header and data row, no wrapping. PATCH B (silenced /auth/me 401 console noise) PARTIALLY FAILS — the axios validateStatus prevents JS exception but the browser's native network stack STILL logs 'Failed to load resource: the server responded with a status of 401 ()' for /api/auth/me (2 such entries captured on anon /dashboard load). Backend regression: Board Brief PDF contains 'VERIFIED EVIDENCE CHAIN:' string (verified via pypdf text extraction both from in-process build and live GET /api/audits/{id}/board-brief endpoint). 14/14 backend tests pass.",
+  "patches_verified": {
+    "PATCH_A_grid_math": "PASS — Dashboard.jsx header spans=[1,2,3,1,1,1,2,1]=12; row spans=[1,2,3,1,1,1,2,1]=12. Live screenshot: row height 53px (single line), first cell y=439 == DEL btn y=439 (no wrap).",
+    "PATCH_B_silenced_401": "PARTIAL FAIL — api.js does contain `validateStatus: (s) => s === 200 || s === 401` and axios does not throw, BUT Chromium network stack still emits 'Failed to load resource: 401' console.error for /api/auth/me on anon /dashboard visit (2 occurrences observed). validateStatus does NOT suppress browser-native network-error logging.",
+    "REGRESSION_board_brief_evidence_chain": "PASS — pypdf text extraction of Board Brief PDF (both in-process build_board_brief_pdf(sample) and live GET /api/audits/{id}/board-brief with COMPLETE audit) contains substring 'VERIFIED EVIDENCE CHAIN:'. RobotoMono TTF font pipeline emits the footer text correctly.",
+    "REGRESSION_full_lifecycle_artifacts": "PASS — /api/audits/{id}/pdf, /board-brief, /audit-log all return 200 with non-empty bytes; PDFs start with %PDF magic bytes.",
+    "REGRESSION_previously_locked": "PASS — /api/payments/tier (200 with 'tier'), /api/payments/portal (accepts return_url), /api/public/verify (200/404), /api/public/registry (200), /api/auth/me with valid session (200, correct user_id), /api/auth/me anon (401), /api/webhook/stripe (400 bad signature — endpoint present)."
+  },
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Silenced /auth/me 401 on first paint",
+        "issue": "axios validateStatus prevents JS exception but browser still logs 'Failed to load resource: 401' at the network layer — hyper-user opening DevTools console will still see 2 red 401 entries for /api/auth/me on anon /dashboard visit. The PATCH B claim is technically incomplete. Fix options: (a) backend returns 200 {user: null} for anon instead of 401; (b) frontend skips fetchMe() when document.cookie lacks 'session_token'.",
+        "affected_selectors": ["network:/api/auth/me"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_8_polish.py",
+    "/app/test_reports/pytest/iteration_8.xml"
+  ],
+  "action_items": [
+    "PATCH B: To truly silence the 401 console noise, either (a) make /api/auth/me return 200 with null body for anon OR (b) in AuthProvider check(), skip fetchMe() entirely when document.cookie does not contain 'session_token'. The current axios validateStatus is necessary but insufficient — Chromium logs the 401 at the network layer independently of axios."
+  ],
+  "critical_code_review_comments": [
+    "AuthProvider check() calls fetchMe() unconditionally on every mount, including anon visits — this is architecturally the source of the 401 noise. Consider a cookie-presence guard.",
+    "React StrictMode is likely causing the /auth/me call to fire twice (2 identical 401 console entries observed) — expected in dev but doubles the noise."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_8_polish.py (new — 14 tests, all passing)"
+  ],
+  "success_rate": {"backend": "100% (14/14)", "frontend": "PATCH A 100%, PATCH B partial — see integration_issues"},
+  "test_credentials": "Sessions seeded directly in Mongo (users + user_sessions), cleaned up in teardown fixture. See /app/memory/test_credentials.md.",
+  "seed_data_creation": "TEST_I8_* audits and test-user-i8-* / test-user-i8ui-* users seeded during test runs and cleaned in teardown.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "iteration_8 test file at /app/backend/tests/test_iteration_8_polish.py — reusable. PATCH B's validateStatus fix alone does not silence the browser's 'Failed to load resource: 401' console error; only a backend change (200 null-user) or a cookie-presence gate in AuthProvider will fully close this gap. Use pypdf.PdfReader for PDF text assertions — pypdf is installed (v6.14.2) and correctly extracts text from ReportLab TTF-embedded PDFs.",
+  "rca_of_the_issue": "PATCH B RCA: axios `validateStatus: (s) => s === 200 || s === 401` only tells axios not to throw a JS Error when status is 401; it does NOT suppress the browser's own network-error logging. Chromium's network stack unconditionally writes 'Failed to load resource: the server responded with a status of 401 ()' to devtools console for ANY HTTP 4xx/5xx response, regardless of how the fetch/XHR consumer handles it. Reproduction: fresh incognito context → GET https://audit-engine-38.preview.emergentagent.com/dashboard → open DevTools Console → 2× red 'Failed to load resource: 401' entries pointing at /api/auth/me. Mitigation: either backend returns 200 with body {user: null} for anonymous requests, or AuthProvider.check() gates fetchMe() behind `document.cookie.includes('session_token')`."
+}
