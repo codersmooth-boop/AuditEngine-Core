@@ -5,6 +5,7 @@ import { listAudits, deleteAudit, setLeaderboardOptIn, api } from "../lib/api";
 import NewAuditDrawer from "../components/NewAuditDrawer";
 import UtcClock from "../components/UtcClock";
 import ProvisionAccessLink from "../components/ProvisionAccessLink";
+import ConfirmDialog from "../components/ConfirmDialog";
 
 export default function Dashboard() {
   const { user, logout, refresh } = useAuth();
@@ -13,6 +14,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [optSaving, setOptSaving] = useState(false);
   const [streak, setStreak] = useState(null);
+  const [pendingDelete, setPendingDelete] = useState(null);
   const nav = useNavigate();
 
   const load = async () => {
@@ -38,9 +40,15 @@ export default function Dashboard() {
     nav(`/audits/${a.audit_id}`);
   };
 
-  const remove = async (id, e) => {
+  const remove = (id, e) => {
     e.stopPropagation();
-    if (!window.confirm("Delete this audit?")) return;
+    setPendingDelete(id);
+  };
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    const id = pendingDelete;
+    setPendingDelete(null);
     await deleteAudit(id);
     load();
   };
@@ -60,6 +68,7 @@ export default function Dashboard() {
           <div className="flex gap-6">
             <span className="mono text-[10px] tracking-widest text-[#00FF41]">// WORKSPACE</span>
             <button data-testid="nav-ledger" onClick={() => nav("/ledger")} className="mono text-[10px] tracking-widest text-[#808080] hover:text-white">⧉ COMPLIANCE LEDGER</button>
+            <button data-testid="nav-verify" onClick={() => nav("/verify")} className="mono text-[10px] tracking-widest text-[#808080] hover:text-white">⧉ VERIFY ROOT</button>
           </div>
         </div>
         <div className="flex items-center gap-6">
@@ -138,11 +147,12 @@ export default function Dashboard() {
       <div className="px-8 py-6">
         <div className="grid grid-cols-12 mono text-[10px] text-[#808080] tracking-widest py-3 border-b-[0.5px] border-[#2A2A2A]">
           <div className="col-span-1">#</div>
-          <div className="col-span-4">CLIENT</div>
+          <div className="col-span-3">CLIENT</div>
           <div className="col-span-3">NACE SECTOR</div>
           <div className="col-span-1">YEAR</div>
           <div className="col-span-1">SCORE</div>
           <div className="col-span-1">STATUS</div>
+          <div className="col-span-2 text-right">CREATED · UTC</div>
           <div className="col-span-1 text-right">ACTIONS</div>
         </div>
 
@@ -163,11 +173,14 @@ export default function Dashboard() {
             className="grid grid-cols-12 mono text-xs items-center py-4 border-b-[0.5px] border-[#1A1A1A] hover:bg-[#0D0D0D] cursor-pointer transition-colors"
           >
             <div className="col-span-1 text-[#808080]">{String(i + 1).padStart(3, "0")}</div>
-            <div className="col-span-4 sans text-[#E8E8E8] text-sm">{a.client_name}</div>
+            <div className="col-span-3 sans text-[#E8E8E8] text-sm">{a.client_name}</div>
             <div className="col-span-3 text-[#808080] truncate pr-4">{a.nace_code} · {a.nace_name}</div>
             <div className="col-span-1 text-[#E8E8E8]">{a.reporting_year}</div>
             <div className="col-span-1 text-[#E8E8E8]">{a.compliance_score ?? "—"}</div>
             <div className={`col-span-1 ${statusColor[a.status] || "text-[#808080]"}`}>{a.status}</div>
+            <div className="col-span-2 text-right text-[#808080]" data-testid={`audit-created-${a.audit_id}`}>
+              {a.created_at ? `${String(a.created_at).replace("T", " · ").slice(0, 19)}Z` : "—"}
+            </div>
             <div className="col-span-1 text-right">
               <button
                 data-testid={`delete-audit-${a.audit_id}`}
@@ -180,6 +193,18 @@ export default function Dashboard() {
       </div>
 
       <NewAuditDrawer open={open} onClose={() => setOpen(false)} onCreated={onCreated} />
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        title="// CONFIRM DELETION"
+        message="This audit will be removed from the workspace. The Merkle Root — once minted — persists permanently in the public registry."
+        confirmLabel="▸ EXECUTE"
+        cancelLabel="← ABORT"
+        tone="#FF0000"
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
+        testid="delete-audit-confirm"
+      />
     </div>
   );
 }

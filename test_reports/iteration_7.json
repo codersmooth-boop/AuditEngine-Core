@@ -1,0 +1,36 @@
+{
+  "summary": "ZERO-GAP CLOSURE iteration 7 — all 15 patches verified. Backend: 15/15 passed, 1 skipped (regulator/sandbox/list endpoint absent — non-blocking). Frontend: source-grep verified for all Google-OAuth-gated components; PaymentSuccess page live-tested and banner reads '// PROVISIONING…' as spec.",
+  "patches_verified": {
+    "PATCH_1_easeOutCubic": "PASS — ComplianceRing.jsx line 4 defines easeOutCubic, no 'transition: stroke' present",
+    "PATCH_2_no_stroke_transition": "PASS — no transition inline style on animated circle",
+    "PATCH_3_provenance_cell": "PASS — AuditView.jsx has computeCompositeHash (line 13), data-testid=audit-provenance (244), composite-hash (247), verify-provenance-btn (257). useEffect for composite is placed BEFORE early-return (Rules of Hooks ✓)",
+    "PATCH_4_rescore_simulator": "PASS — RescoreSimulator.jsx has sim-eur (line 92), scenario-lock-btn (77), scenario-clear-btn (70), scenario-drift (97), localStorage key 'ae:scenario:${audit.audit_id}' (24)",
+    "PATCH_5_pdf_fonts": "PASS — no Courier/Helvetica; MONO='RobotoMono', SANS='Inter'; 4 TTF files registered; Board Brief PDF generation succeeds and outputs 44 KB+ bytes",
+    "PATCH_6_board_brief_surface": "PASS — pdf_service.py line 455 uses setFillColor(SURFACE) in board-brief _page_bg",
+    "PATCH_7_upload_ceiling_backend": "PASS — MAX_UPLOAD_BYTES=25*1024*1024 (server.py:377); 26MB upload rejected with 413 'exceeds 25 MB ceiling'",
+    "PATCH_8_upload_ceiling_client": "PASS — IntakeZone.jsx line 5 has MAX_UPLOAD_BYTES=25*1024*1024, inline error 'File exceeds 25 MB ceiling' in mono-red (#FF0000) via data-testid=intake-error",
+    "PATCH_9_confirm_dialog": "PASS — ConfirmDialog.jsx exists, imported in Dashboard.jsx (line 8); grep confirms 'window.confirm' absent from Dashboard.jsx",
+    "PATCH_10_reset_endpoint": "PASS — POST /api/audits/{id}/reset: unauthenticated=401, nonexistent=404, non-owner=404, DRAFT status=409, FAILED→DRAFT=200 (persisted verified via GET)",
+    "PATCH_11_reinitiate_btn": "PASS — AuditView.jsx line 203 data-testid=reinitiate-btn present in FAILED-state block",
+    "PATCH_12_payment_success_wording": "PASS — PaymentSuccess.jsx banner map contains PROVISIONING… (polling), PROVISIONING COMPLETE (paid), PROVISIONING FAILED (failed); paid H1='Access provisioned.'. Live screenshot confirms '// PROVISIONING…' banner.",
+    "PATCH_13_nav_verify": "PASS — Dashboard.jsx line 71 data-testid=nav-verify link to /verify",
+    "PATCH_14_utc_clock": "PASS — UtcClock.jsx line 14 renders 'UTC · ${hh}:${mm}:${ss}' with middle dot",
+    "PATCH_15_audit_row_timestamp": "PASS — Dashboard.jsx line 173 grid-cols-12; line 181 has data-testid=audit-created-${id} in right-aligned col-span-2"
+  },
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "regression": "PASS — /api/payments/tier, /api/public/verify, /api/public/registry, /api/auth/me all 200. /api/regulator/sandbox/list returned 404 (endpoint not present under that path — may live at a different route; not a regression per iteration_6 report).",
+  "test_report_links": ["/app/backend/tests/test_zero_gap_closure.py", "/app/test_reports/pytest/zg_iter7.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is 913 lines — approaching threshold; consider splitting audit/payments/verify routers into separate modules for maintainability",
+    "pdf_service.py board-brief _page_bg assumes file_hashes items are dicts with 'sha256' key — if any legacy audits have string entries, page render will 500. Consider defensive: `x.get('sha256','') if isinstance(x, dict) else x`"
+  ],
+  "updated_files": ["/app/backend/tests/test_zero_gap_closure.py (new)"],
+  "success_rate": {"backend": "100% (15/15, 1 skipped non-blocking)", "frontend": "100% source-grep + live PaymentSuccess"},
+  "test_credentials": "Sessions seeded directly in Mongo per /app/memory/test_credentials.md; cleaned up in teardown fixture.",
+  "seed_data_creation": "TEST_ZG_* audits and test-user-zg-* users seeded and torn down within the module fixture.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "iteration_7 = 15/15 patches verified. New regression harness at /app/backend/tests/test_zero_gap_closure.py covers PDF gen, upload ceiling, and reset endpoint flows — reusable for future iterations. Note: AuditCreate requires client_name + nace_code + nace_name + reporting_year (nace_name easy-to-miss)."
+}

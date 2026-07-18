@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { getAudit, pdfUrl, boardBriefUrl, streamUrl, auditLogUrl } from "../lib/api";
+import { getAudit, pdfUrl, boardBriefUrl, streamUrl, auditLogUrl, api } from "../lib/api";
 import IntakeZone from "../components/IntakeZone";
 import ProcessingPanel from "../components/ProcessingPanel";
 import KPIStrip from "../components/KPIStrip";
@@ -9,6 +9,14 @@ import RoadmapPanel from "../components/RoadmapPanel";
 import RescoreSimulator from "../components/RescoreSimulator";
 import UtcClock from "../components/UtcClock";
 import { useAuth } from "../lib/auth";
+
+async function computeCompositeHash(fileHashes) {
+  if (!Array.isArray(fileHashes) || fileHashes.length === 0) return null;
+  const concat = fileHashes.map(fh => fh.sha256 || "").join("|");
+  const buf = new TextEncoder().encode(concat);
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, "0")).join("");
+}
 
 export default function AuditView() {
   const { id } = useParams();
@@ -19,6 +27,8 @@ export default function AuditView() {
   const [startedAt, setStartedAt] = useState(null);
   const [logs, setLogs] = useState([]);
   const [streamMode, setStreamMode] = useState("sse"); // sse | poll
+  const [composite, setComposite] = useState(null);
+  const [reinitBusy, setReinitBusy] = useState(false);
   const pollRef = useRef(null);
   const esRef = useRef(null);
   const streamStepRef = useRef(0);
@@ -89,9 +99,31 @@ export default function AuditView() {
     };
   }, [id]);
 
+  // Composite evidence hash — recomputed client-side from ingested file hashes.
+  // Matches the value the backend uses internally (see server.py:513).
+  // MUST live above any early return to satisfy the Rules of Hooks.
+  useEffect(() => {
+    if (!audit || audit.status !== "COMPLETE") { setComposite(null); return; }
+    computeCompositeHash(audit.file_hashes || []).then(setComposite).catch(() => setComposite(null));
+  }, [audit?.status, audit?.file_hashes]);
+
   if (!audit) {
     return <div className="min-h-screen bg-black text-[#808080] mono text-xs p-8 ae-cursor">LOADING AUDIT</div>;
   }
+
+  const reinitiate = async () => {
+    if (reinitBusy) return;
+    setReinitBusy(true);
+    try {
+      await api.post(`/audits/${audit.audit_id}/reset`);
+      await load();
+    } catch (e) {
+      // Fallback: force a reload so the user is not stuck.
+      window.location.reload();
+    } finally {
+      setReinitBusy(false);
+    }
+  };
 
   const toggleResolve = (fid) => {
     setResolved(prev => {
@@ -162,7 +194,23 @@ export default function AuditView() {
         <div className="p-8">
           <div className="ae-border-strong p-8 bg-[#050505]">
             <div className="mono text-[10px] tracking-widest text-[#FF0000]">// FAILED</div>
-            <div className="sans text-xl mt-2">Processing failed. Try re-uploading.</div>
+            <div className="sans text-xl mt-2">Processing terminated. Evidence set retained; re-initiate to reprocess.</div>
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={reinitiate}
+                disabled={reinitBusy}
+                data-testid="reinitiate-btn"
+                className="mono text-xs tracking-[0.2em] ae-border-strong px-6 py-3 bg-[#00FF41] text-black hover:bg-white disabled:bg-[#333] disabled:text-[#808080] transition-colors"
+              >
+                {reinitBusy ? "RESETTING…" : "▸ RE-INITIATE"}
+              </button>
+              <button
+                type="button"
+                onClick={() => nav("/dashboard")}
+                className="mono text-xs tracking-[0.2em] px-6 py-3 border-[0.5px] border-[#2A2A2A] text-[#808080] hover:text-white hover:border-white transition-colors"
+              >← WORKSPACE</button>
+            </div>
           </div>
         </div>
       )}
@@ -192,6 +240,25 @@ export default function AuditView() {
             </div>
             <aside className="p-8 space-y-8">
               <RescoreSimulator audit={audit} resolved={resolved} projectedScore={projected} />
+
+              <div className="ae-border-strong p-6" data-testid="audit-provenance">
+                <div className="mono text-[10px] tracking-[0.3em] text-[#808080]">// PROVENANCE</div>
+                <div className="sans text-xl font-light mt-2">Composite evidence hash.</div>
+                <div className="mono text-[11px] text-[#E8E8E8] break-all mt-4 leading-relaxed" data-testid="composite-hash">
+                  {composite || "— computing —"}
+                </div>
+                <div className="mono text-[10px] text-[#808080] mt-3 leading-relaxed">
+                  SHA-256 of ({(audit.file_hashes || []).length}) ingested file hashes, pipe-joined in insertion order.
+                </div>
+                {composite && (
+                  <button
+                    type="button"
+                    onClick={() => nav(`/verify?root=${composite}`)}
+                    data-testid="verify-provenance-btn"
+                    className="mono text-[10px] tracking-widest text-[#00FF41] mt-4 hover:text-white"
+                  >→ VERIFY ROOT</button>
+                )}
+              </div>
 
               <div className="ae-border-strong p-6">
                 <div className="mono text-[10px] tracking-[0.3em] text-[#808080]">// PDF DELIVERY</div>

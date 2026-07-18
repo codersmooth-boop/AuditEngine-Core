@@ -1,5 +1,8 @@
 import React, { useEffect, useState } from "react";
 
+/** ease-out cubic — matches the "smooth, high-frequency curve" spec. */
+const easeOutCubic = (p) => 1 - Math.pow(1 - p, 3);
+
 export default function ComplianceRing({ score = 0, size = 180, animate = true }) {
   const [display, setDisplay] = useState(animate ? 0 : score);
   useEffect(() => {
@@ -8,9 +11,10 @@ export default function ComplianceRing({ score = 0, size = 180, animate = true }
     const dur = 800;
     let raf;
     const tick = (t) => {
-      const p = Math.min(1, (t - start) / dur);
+      const raw = Math.min(1, (t - start) / dur);
+      const p = easeOutCubic(raw);
       setDisplay(Math.round(score * p));
-      if (p < 1) raf = requestAnimationFrame(tick);
+      if (raw < 1) raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
@@ -30,7 +34,6 @@ export default function ComplianceRing({ score = 0, size = 180, animate = true }
           cx={size / 2} cy={size / 2} r={r}
           stroke={color} strokeWidth={stroke} fill="none"
           strokeDasharray={c} strokeDashoffset={off}
-          style={{ transition: "stroke 400ms" }}
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">

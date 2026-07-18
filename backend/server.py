@@ -374,6 +374,9 @@ async def _run_processing(audit_id: str, extracted_texts: List[dict], client_nam
         await db.audits.update_one({"audit_id": audit_id}, {"$set": {"status": "FAILED", "error": str(e)}})
 
 
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB per file (mirrored in IntakeZone.jsx)
+
+
 @api_router.post("/audits/{audit_id}/upload")
 async def upload_files(audit_id: str, background_tasks: BackgroundTasks,
                        files: List[UploadFile] = File(...),
@@ -388,6 +391,11 @@ async def upload_files(audit_id: str, background_tasks: BackgroundTasks,
     import hashlib
     for f in files:
         content = await f.read()
+        if len(content) > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File {f.filename} exceeds 25 MB ceiling ({len(content) / (1024*1024):.1f} MB)",
+            )
         text = extract_text_from_file(f.filename or "file", content)
         extracted.append({"filename": f.filename, "text": text[:60000]})
         filenames.append(f.filename)
@@ -407,6 +415,26 @@ async def upload_files(audit_id: str, background_tasks: BackgroundTasks,
         audit["client_name"], audit["nace_name"], audit["nace_code"], audit["reporting_year"],
     )
     return {"ok": True, "audit_id": audit_id, "files": filenames}
+
+
+@api_router.post("/audits/{audit_id}/reset")
+async def reset_audit(audit_id: str, user: dict = Depends(get_current_user)):
+    """Return a FAILED audit to DRAFT so the user can re-upload evidence.
+    Preserves audit metadata (client, NACE, year) and file_hashes for the audit trail."""
+    audit = await db.audits.find_one({"audit_id": audit_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not audit:
+        raise HTTPException(status_code=404, detail="Audit not found")
+    if audit.get("status") not in ("FAILED", "PROCESSING"):
+        raise HTTPException(status_code=409, detail=f"Cannot reset audit in {audit.get('status')} state")
+    await db.audits.update_one(
+        {"audit_id": audit_id},
+        {"$set": {"status": "DRAFT", "processing_step": 0, "files": [],
+                  "stream_logs": [], "findings": [], "roadmap": [],
+                  "executive_summary": None, "compliance_score": None,
+                  "value_at_stake_eur": None, "greenwashing_risk": None,
+                  "critical_findings_count": None, "completed_at": None}},
+    )
+    return {"audit_id": audit_id, "status": "DRAFT"}
 
 
 @api_router.get("/audits/{audit_id}/stream")

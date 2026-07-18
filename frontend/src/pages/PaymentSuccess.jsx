@@ -53,12 +53,12 @@ export default function PaymentSuccess() {
   }, [sessionId]);
 
   const banner = {
-    polling: { text: "VERIFYING PAYMENT…", color: "#FFBF00" },
-    paid: { text: "PAYMENT CONFIRMED", color: "#00FF41" },
-    failed: { text: "PAYMENT FAILED", color: "#FF0000" },
+    polling: { text: "PROVISIONING…", color: "#FFBF00" },
+    paid: { text: "PROVISIONING COMPLETE", color: "#00FF41" },
+    failed: { text: "PROVISIONING FAILED", color: "#FF0000" },
     expired: { text: "SESSION EXPIRED", color: "#FF0000" },
     refunded: { text: "REFUNDED", color: "#FFBF00" },
-    timeout: { text: "STILL PENDING · WEBHOOK RETRY", color: "#FFBF00" },
+    timeout: { text: "PENDING · WEBHOOK RETRY", color: "#FFBF00" },
     missing: { text: "MISSING SESSION_ID", color: "#FF0000" },
   }[status];
 
@@ -74,11 +74,11 @@ export default function PaymentSuccess() {
             // {banner.text}
           </div>
           <h1 className="sans text-4xl font-light tracking-tight mb-3" data-testid="payment-success-heading">
-            {status === "paid" ? "Ledger extended." : status === "polling" ? "Sealing the transaction." : "Transaction record."}
+            {status === "paid" ? "Access provisioned." : status === "polling" ? "Sealing the transaction." : "Transaction record."}
           </h1>
           <p className="sans text-[#808080] text-base leading-relaxed mb-10 max-w-2xl">
             {status === "paid"
-              ? "Your subscription is active. Every subsequent audit will be signed under this workspace and folded into your Merkle Root ledger."
+              ? "Your subscription is active. AuditEngine is now provisioned under this workspace. Every subsequent audit will be signed and folded into your Merkle Root ledger."
               : status === "polling"
               ? `Awaiting confirmation from Stripe · poll ${tries}/${MAX_POLLS}. Webhook fallback and direct Stripe check run in parallel.`
               : "Details below. If you believe this is in error, please contact support with the session ID."}

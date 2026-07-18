@@ -1,5 +1,6 @@
 """Generate a terminal-styled PDF audit report using reportlab."""
 from datetime import datetime, timezone
+from pathlib import Path
 
 import io
 from pypdf import PdfWriter, PdfReader
@@ -7,10 +8,32 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
 
+# --- Spec fonts (Roboto Mono + Inter) ---------------------------------------
+# Registered once at import time. All ParagraphStyles reference these names
+# instead of ReportLab's base14 fonts so the Mirror-of-Certainty typography
+# system is bit-identical between screen and paper.
+_FONTS_DIR = Path(__file__).parent / "fonts"
+for _name, _file in [
+    ("RobotoMono",      "RobotoMono-Regular.ttf"),
+    ("RobotoMono-Bold", "RobotoMono-Bold.ttf"),
+    ("Inter",           "Inter-Regular.ttf"),
+    ("Inter-Bold",      "Inter-Bold.ttf"),
+]:
+    if _name not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont(_name, str(_FONTS_DIR / _file)))
+
+MONO = "RobotoMono"
+MONO_BOLD = "RobotoMono-Bold"
+SANS = "Inter"
+SANS_BOLD = "Inter-Bold"
+
 BLACK = colors.HexColor("#000000")
-SURFACE = colors.HexColor("#0D0D0D")
+SURFACE = colors.HexColor("#050505")
+SURFACE_2 = colors.HexColor("#0D0D0D")
 BORDER = colors.HexColor("#2A2A2A")
 TEXT = colors.HexColor("#E8E8E8")
 SECONDARY = colors.HexColor("#808080")
@@ -48,11 +71,11 @@ def _build_full_body(audit: dict) -> bytes:
     )
     styles = getSampleStyleSheet()
 
-    mono = ParagraphStyle("mono", parent=styles["Normal"], fontName="Courier", fontSize=8, textColor=TEXT, leading=11)
+    mono = ParagraphStyle("mono", parent=styles["Normal"], fontName=MONO, fontSize=8, textColor=TEXT, leading=11)
     mono_sec = ParagraphStyle("mono_sec", parent=mono, textColor=SECONDARY)
-    h1 = ParagraphStyle("h1", parent=styles["Heading1"], fontName="Helvetica-Bold", fontSize=18, textColor=TEXT, spaceAfter=4)
-    h2 = ParagraphStyle("h2", parent=styles["Heading2"], fontName="Courier-Bold", fontSize=10, textColor=SECONDARY, spaceBefore=12, spaceAfter=6)
-    body = ParagraphStyle("body", parent=styles["Normal"], fontName="Helvetica", fontSize=9, textColor=TEXT, leading=13)
+    h1 = ParagraphStyle("h1", parent=styles["Heading1"], fontName=SANS_BOLD, fontSize=18, textColor=TEXT, spaceAfter=4)
+    h2 = ParagraphStyle("h2", parent=styles["Heading2"], fontName=MONO_BOLD, fontSize=10, textColor=SECONDARY, spaceBefore=12, spaceAfter=6)
+    body = ParagraphStyle("body", parent=styles["Normal"], fontName=SANS, fontSize=9, textColor=TEXT, leading=13)
 
     story = []
 
@@ -81,8 +104,8 @@ def _build_full_body(audit: dict) -> bytes:
         ("TEXTCOLOR", (0, 0), (-1, 0), SECONDARY),
         ("TEXTCOLOR", (0, 1), (-1, 1), TEXT),
         ("TEXTCOLOR", (0, 1), (0, 1), score_color),
-        ("FONTNAME", (0, 0), (-1, 0), "Courier"),
-        ("FONTNAME", (0, 1), (-1, 1), "Courier-Bold"),
+        ("FONTNAME", (0, 0), (-1, 0), MONO),
+        ("FONTNAME", (0, 1), (-1, 1), MONO_BOLD),
         ("FONTSIZE", (0, 0), (-1, 0), 7),
         ("FONTSIZE", (0, 1), (-1, 1), 12),
         ("ALIGN", (0, 0), (-1, -1), "LEFT"),
@@ -107,7 +130,7 @@ def _build_full_body(audit: dict) -> bytes:
     for f in findings:
         sev = f.get("severity", "MODERATE")
         header = f"[{sev}] {f.get('data_point','')} — {f.get('status','')} · {f.get('regulatory_ref','')}"
-        story.append(Paragraph(header, ParagraphStyle("sev", parent=mono, textColor=_sev_color(sev), fontName="Courier-Bold")))
+        story.append(Paragraph(header, ParagraphStyle("sev", parent=mono, textColor=_sev_color(sev), fontName=MONO_BOLD)))
         story.append(Paragraph(f.get("finding_detail", ""), body))
         if f.get("recommendation"):
             story.append(Paragraph(f"→ {f['recommendation']}", mono_sec))
@@ -132,8 +155,8 @@ def _build_full_body(audit: dict) -> bytes:
             ("BACKGROUND", (0, 0), (-1, 0), SURFACE),
             ("TEXTCOLOR", (0, 0), (-1, 0), SECONDARY),
             ("TEXTCOLOR", (0, 1), (-1, -1), TEXT),
-            ("FONTNAME", (0, 0), (-1, 0), "Courier-Bold"),
-            ("FONTNAME", (0, 1), (-1, -1), "Courier"),
+            ("FONTNAME", (0, 0), (-1, 0), MONO_BOLD),
+            ("FONTNAME", (0, 1), (-1, -1), MONO),
             ("FONTSIZE", (0, 0), (-1, -1), 7),
             ("BOX", (0, 0), (-1, -1), 0.5, BORDER),
             ("INNERGRID", (0, 0), (-1, -1), 0.5, BORDER),
@@ -167,7 +190,7 @@ def _build_full_body(audit: dict) -> bytes:
         ("BACKGROUND", (0, 0), (0, -1), SURFACE),
         ("TEXTCOLOR", (0, 0), (0, -1), SECONDARY),
         ("TEXTCOLOR", (1, 0), (1, -1), TEXT),
-        ("FONTNAME", (0, 0), (-1, -1), "Courier"),
+        ("FONTNAME", (0, 0), (-1, -1), MONO),
         ("FONTSIZE", (0, 0), (-1, -1), 8),
         ("BOX", (0, 0), (-1, -1), 0.5, BORDER),
         ("INNERGRID", (0, 0), (-1, -1), 0.5, BORDER),
@@ -193,7 +216,7 @@ def _build_full_body(audit: dict) -> bytes:
         canvas.setFillColor(BLACK)
         canvas.rect(0, 0, doc.pagesize[0], doc.pagesize[1], fill=1, stroke=0)
         canvas.setFillColor(SECONDARY)
-        canvas.setFont("Courier", 7)
+        canvas.setFont(MONO, 7)
         canvas.drawString(18 * mm, 10 * mm, "AUDITENGINE // CONFIDENTIAL")
         canvas.drawRightString(doc.pagesize[0] - 18 * mm, 10 * mm, f"PAGE {doc.page:03d}")
         canvas.restoreState()
@@ -215,11 +238,11 @@ def build_board_brief_pdf(audit: dict) -> bytes:
     )
 
     WHITE_BORDER = colors.HexColor("#FFFFFF")
-    mono = ParagraphStyle("mono", fontName="Courier", fontSize=8, textColor=TEXT, leading=11)
-    mono_sec = ParagraphStyle("mono_sec", fontName="Courier", fontSize=7, textColor=SECONDARY, leading=10, letterSpacing=1)
-    verdict = ParagraphStyle("verdict", fontName="Helvetica", fontSize=11, textColor=TEXT, leading=16)
-    label = ParagraphStyle("label", fontName="Courier", fontSize=7, textColor=SECONDARY, leading=10, letterSpacing=1.4)
-    metric_l = ParagraphStyle("metric_l", fontName="Courier", fontSize=18, textColor=TEXT, leading=22)
+    mono = ParagraphStyle("mono", fontName=MONO, fontSize=8, textColor=TEXT, leading=11)
+    mono_sec = ParagraphStyle("mono_sec", fontName=MONO, fontSize=7, textColor=SECONDARY, leading=10, letterSpacing=1)
+    verdict = ParagraphStyle("verdict", fontName=SANS, fontSize=11, textColor=TEXT, leading=16)
+    label = ParagraphStyle("label", fontName=MONO, fontSize=7, textColor=SECONDARY, leading=10, letterSpacing=1.4)
+    metric_l = ParagraphStyle("metric_l", fontName=MONO, fontSize=18, textColor=TEXT, leading=22)
 
     score = int(audit.get("compliance_score", 0) or 0)
     score_color = COMPLIANT if score >= 80 else MODERATE if score >= 60 else CRITICAL
@@ -234,7 +257,7 @@ def build_board_brief_pdf(audit: dict) -> bytes:
         Paragraph("<font color='#808080'>// GENERATED</font>", label),
         Paragraph("<font color='#808080'>// CASE</font>", label),
     ], [
-        Paragraph(f"<b>{audit.get('client_name','')}</b>", ParagraphStyle("client", fontName="Helvetica-Bold", fontSize=13, textColor=TEXT, leading=15)),
+        Paragraph(f"<b>{audit.get('client_name','')}</b>", ParagraphStyle("client", fontName=SANS_BOLD, fontSize=13, textColor=TEXT, leading=15)),
         Paragraph(generated, mono),
         Paragraph(audit.get("audit_id", "").upper(), mono_sec),
     ]]
@@ -257,14 +280,14 @@ def build_board_brief_pdf(audit: dict) -> bytes:
         Paragraph("<font color='#808080'>// COMPLIANCE SCORE</font>", label),
     ], [
         Paragraph(
-            f"<font color='{score_hex}' name='Courier'><b>{score:03d}</b></font>"
+            f"<font color='{score_hex}' name='RobotoMono'><b>{score:03d}</b></font>"
             "<font color='#808080' size='10'> / 100</font>",
-            ParagraphStyle("heroScore", fontName="Courier-Bold", fontSize=64, textColor=score_color, leading=68, alignment=1),
+            ParagraphStyle("heroScore", fontName=MONO_BOLD, fontSize=64, textColor=score_color, leading=68, alignment=1),
         ),
     ], [
         Paragraph(
             "MATERIALLY COMPLIANT" if score >= 80 else "PARTIAL ALIGNMENT" if score >= 60 else "NON-COMPLIANT POSTURE",
-            ParagraphStyle("heroLbl", fontName="Courier-Bold", fontSize=9, textColor=score_color, leading=12, alignment=1, letterSpacing=3),
+            ParagraphStyle("heroLbl", fontName=MONO_BOLD, fontSize=9, textColor=score_color, leading=12, alignment=1, letterSpacing=3),
         ),
     ]]
     hero_tbl = Table(hero, colWidths=[178 * mm])
@@ -313,8 +336,8 @@ def build_board_brief_pdf(audit: dict) -> bytes:
             Paragraph("<font color='#808080'>// NET RECOVERABLE</font>", label),
         ],
         [
-            Paragraph(f"<font color='#FF0000'>€ {vas:,.0f}</font>", ParagraphStyle("neg", fontName="Courier-Bold", fontSize=18, textColor=CRITICAL, leading=22)),
-            Paragraph(f"<font color='#00FF41'>€ {total_saving:,.0f}</font>", ParagraphStyle("pos", fontName="Courier-Bold", fontSize=18, textColor=COMPLIANT, leading=22)),
+            Paragraph(f"<font color='#FF0000'>€ {vas:,.0f}</font>", ParagraphStyle("neg", fontName=MONO_BOLD, fontSize=18, textColor=CRITICAL, leading=22)),
+            Paragraph(f"<font color='#00FF41'>€ {total_saving:,.0f}</font>", ParagraphStyle("pos", fontName=MONO_BOLD, fontSize=18, textColor=COMPLIANT, leading=22)),
             Paragraph(f"<font color='#E8E8E8'>€ {max(total_saving - total_cost, 0):,.0f}</font>", metric_l),
         ],
         [
@@ -360,15 +383,15 @@ def build_board_brief_pdf(audit: dict) -> bytes:
         sev_c = _sev_color(sev)
         sev_hex = {"CRITICAL": "#FF0000", "MODERATE": "#FFBF00", "COMPLIANT": "#00FF41"}.get(sev, "#808080")
         row = Table([[
-            Paragraph(f"<font color='{sev_hex}' name='Courier-Bold' size='16'>0{i}</font>", ParagraphStyle("num", fontName="Courier-Bold", fontSize=16, textColor=sev_c, leading=18)),
+            Paragraph(f"<font color='{sev_hex}' name='RobotoMono-Bold' size='16'>0{i}</font>", ParagraphStyle("num", fontName=MONO_BOLD, fontSize=16, textColor=sev_c, leading=18)),
             [
-                Paragraph(f"<b><font color='#E8E8E8'>{f.get('data_point','')}</font></b>", ParagraphStyle("dp", fontName="Helvetica-Bold", fontSize=9, textColor=TEXT, leading=12)),
-                Paragraph(f.get("finding_detail", "")[:220], ParagraphStyle("dt", fontName="Helvetica", fontSize=8, textColor=TEXT, leading=11)),
+                Paragraph(f"<b><font color='#E8E8E8'>{f.get('data_point','')}</font></b>", ParagraphStyle("dp", fontName=SANS_BOLD, fontSize=9, textColor=TEXT, leading=12)),
+                Paragraph(f.get("finding_detail", "")[:220], ParagraphStyle("dt", fontName=SANS, fontSize=8, textColor=TEXT, leading=11)),
             ],
             [
-                Paragraph(f"<font color='{sev_hex}'>[{sev}]</font>", ParagraphStyle("sv", fontName="Courier-Bold", fontSize=7, textColor=sev_c, leading=10, letterSpacing=1.5, alignment=2)),
-                Paragraph(f"<font color='#808080'>{f.get('regulatory_ref','')}</font>", ParagraphStyle("rr", fontName="Courier", fontSize=7, textColor=SECONDARY, leading=10, alignment=2)),
-                Paragraph(f"<font color='#808080'>STATUS: {f.get('status','')}</font>", ParagraphStyle("st", fontName="Courier", fontSize=7, textColor=SECONDARY, leading=10, alignment=2)),
+                Paragraph(f"<font color='{sev_hex}'>[{sev}]</font>", ParagraphStyle("sv", fontName=MONO_BOLD, fontSize=7, textColor=sev_c, leading=10, letterSpacing=1.5, alignment=2)),
+                Paragraph(f"<font color='#808080'>{f.get('regulatory_ref','')}</font>", ParagraphStyle("rr", fontName=MONO, fontSize=7, textColor=SECONDARY, leading=10, alignment=2)),
+                Paragraph(f"<font color='#808080'>STATUS: {f.get('status','')}</font>", ParagraphStyle("st", fontName=MONO, fontSize=7, textColor=SECONDARY, leading=10, alignment=2)),
             ],
         ]], colWidths=[12 * mm, 116 * mm, 50 * mm])
         row.setStyle(TableStyle([
@@ -399,18 +422,18 @@ def build_board_brief_pdf(audit: dict) -> bytes:
 
     for i, r in enumerate(roadmap, 1):
         row = Table([[
-            Paragraph(f"<font color='#00FF41' name='Courier-Bold' size='14'>→ 0{i}</font>", ParagraphStyle("fxn", fontName="Courier-Bold", fontSize=14, textColor=COMPLIANT, leading=16)),
+            Paragraph(f"<font color='#00FF41' name='RobotoMono-Bold' size='14'>→ 0{i}</font>", ParagraphStyle("fxn", fontName=MONO_BOLD, fontSize=14, textColor=COMPLIANT, leading=16)),
             [
-                Paragraph(f"<b><font color='#E8E8E8'>{r.get('action','')}</font></b>", ParagraphStyle("fxa", fontName="Helvetica-Bold", fontSize=9, textColor=TEXT, leading=12)),
-                Paragraph(f"<font color='#808080'>{r.get('metric_impact','')}</font>", ParagraphStyle("fxm", fontName="Courier", fontSize=7, textColor=SECONDARY, leading=10)),
+                Paragraph(f"<b><font color='#E8E8E8'>{r.get('action','')}</font></b>", ParagraphStyle("fxa", fontName=SANS_BOLD, fontSize=9, textColor=TEXT, leading=12)),
+                Paragraph(f"<font color='#808080'>{r.get('metric_impact','')}</font>", ParagraphStyle("fxm", fontName=MONO, fontSize=7, textColor=SECONDARY, leading=10)),
             ],
             [
-                Paragraph(f"<font color='#00FF41'>€ {float(r.get('saving_eur') or 0):,.0f}</font>", ParagraphStyle("fxs", fontName="Courier-Bold", fontSize=10, textColor=COMPLIANT, leading=12, alignment=2)),
-                Paragraph(f"<font color='#808080'>SAVING</font>", ParagraphStyle("fxsl", fontName="Courier", fontSize=6, textColor=SECONDARY, leading=8, alignment=2)),
+                Paragraph(f"<font color='#00FF41'>€ {float(r.get('saving_eur') or 0):,.0f}</font>", ParagraphStyle("fxs", fontName=MONO_BOLD, fontSize=10, textColor=COMPLIANT, leading=12, alignment=2)),
+                Paragraph(f"<font color='#808080'>SAVING</font>", ParagraphStyle("fxsl", fontName=MONO, fontSize=6, textColor=SECONDARY, leading=8, alignment=2)),
             ],
             [
-                Paragraph(f"<font color='#FFBF00'>{int(r.get('payback_months') or 0)} MO</font>", ParagraphStyle("fxp", fontName="Courier-Bold", fontSize=10, textColor=MODERATE, leading=12, alignment=2)),
-                Paragraph(f"<font color='#808080'>PAYBACK</font>", ParagraphStyle("fxpl", fontName="Courier", fontSize=6, textColor=SECONDARY, leading=8, alignment=2)),
+                Paragraph(f"<font color='#FFBF00'>{int(r.get('payback_months') or 0)} MO</font>", ParagraphStyle("fxp", fontName=MONO_BOLD, fontSize=10, textColor=MODERATE, leading=12, alignment=2)),
+                Paragraph(f"<font color='#808080'>PAYBACK</font>", ParagraphStyle("fxpl", fontName=MONO, fontSize=6, textColor=SECONDARY, leading=8, alignment=2)),
             ],
         ]], colWidths=[16 * mm, 100 * mm, 32 * mm, 30 * mm])
         row.setStyle(TableStyle([
@@ -426,10 +449,13 @@ def build_board_brief_pdf(audit: dict) -> bytes:
 
     def _page_bg(canvas, doc):
         canvas.saveState()
-        canvas.setFillColor(BLACK)
+        # Board Brief uses Surface 1 (#050505) on page 1 — subtly warmer than
+        # pure black, preserves the on-screen depth continuity between the
+        # workspace terminal and the printed instrument.
+        canvas.setFillColor(SURFACE)
         canvas.rect(0, 0, doc.pagesize[0], doc.pagesize[1], fill=1, stroke=0)
         canvas.setFillColor(SECONDARY)
-        canvas.setFont("Courier", 6.5)
+        canvas.setFont(MONO, 6.5)
         canvas.drawString(16 * mm, 10 * mm, "AUDITENGINE // BOARD BRIEF // CONFIDENTIAL")
         canvas.drawRightString(doc.pagesize[0] - 16 * mm, 10 * mm, "THE MIRROR OF CERTAINTY")
         # Verified evidence chain
@@ -437,7 +463,7 @@ def build_board_brief_pdf(audit: dict) -> bytes:
         fh = audit.get("file_hashes") or []
         composite_hash = _hl.sha256(("|".join(x.get("sha256", "") for x in fh)).encode()).hexdigest() if fh else "—"
         canvas.setFillColor(colors.HexColor("#00FF41"))
-        canvas.setFont("Courier", 6.5)
+        canvas.setFont(MONO, 6.5)
         canvas.drawString(16 * mm, 6 * mm, f"VERIFIED EVIDENCE CHAIN: {composite_hash}")
         canvas.restoreState()
 
@@ -456,10 +482,10 @@ def build_snapshot_pdf(entries: list, year: int, merkle_root: str, workspace_ema
     )
     WHITE = colors.HexColor("#FFFFFF")
 
-    label = ParagraphStyle("label", fontName="Courier", fontSize=7, textColor=SECONDARY, leading=10, letterSpacing=1.4)
-    mono = ParagraphStyle("mono", fontName="Courier", fontSize=8, textColor=TEXT, leading=11)
-    mono_sec = ParagraphStyle("mono_sec", fontName="Courier", fontSize=7, textColor=SECONDARY, leading=10)
-    h1 = ParagraphStyle("h1", fontName="Helvetica-Bold", fontSize=22, textColor=TEXT, leading=26)
+    label = ParagraphStyle("label", fontName=MONO, fontSize=7, textColor=SECONDARY, leading=10, letterSpacing=1.4)
+    mono = ParagraphStyle("mono", fontName=MONO, fontSize=8, textColor=TEXT, leading=11)
+    mono_sec = ParagraphStyle("mono_sec", fontName=MONO, fontSize=7, textColor=SECONDARY, leading=10)
+    h1 = ParagraphStyle("h1", fontName=SANS_BOLD, fontSize=22, textColor=TEXT, leading=26)
 
     story = []
 
@@ -481,13 +507,13 @@ def build_snapshot_pdf(entries: list, year: int, merkle_root: str, workspace_ema
 
     kpi = Table([[
         [Paragraph("<font color='#808080'>// AUDITS ON RECORD</font>", label),
-         Paragraph(f"<font color='#E8E8E8'>{n:03d}</font>", ParagraphStyle("v", fontName="Courier-Bold", fontSize=22, textColor=TEXT, leading=26))],
+         Paragraph(f"<font color='#E8E8E8'>{n:03d}</font>", ParagraphStyle("v", fontName=MONO_BOLD, fontSize=22, textColor=TEXT, leading=26))],
         [Paragraph("<font color='#808080'>// AVG COMPLIANCE</font>", label),
-         Paragraph(f"<font color='{score_hex}'>{avg_score}/100</font>", ParagraphStyle("v2", fontName="Courier-Bold", fontSize=22, leading=26))],
+         Paragraph(f"<font color='{score_hex}'>{avg_score}/100</font>", ParagraphStyle("v2", fontName=MONO_BOLD, fontSize=22, leading=26))],
         [Paragraph("<font color='#808080'>// TOTAL VALUE-AT-STAKE</font>", label),
-         Paragraph(f"<font color='#FF0000'>€ {total_vas:,.0f}</font>", ParagraphStyle("v3", fontName="Courier-Bold", fontSize=22, leading=26))],
+         Paragraph(f"<font color='#FF0000'>€ {total_vas:,.0f}</font>", ParagraphStyle("v3", fontName=MONO_BOLD, fontSize=22, leading=26))],
         [Paragraph("<font color='#808080'>// CRITICAL FINDINGS</font>", label),
-         Paragraph(f"<font color='#FFBF00'>{total_crit}</font>", ParagraphStyle("v4", fontName="Courier-Bold", fontSize=22, leading=26))],
+         Paragraph(f"<font color='#FFBF00'>{total_crit}</font>", ParagraphStyle("v4", fontName=MONO_BOLD, fontSize=22, leading=26))],
     ]], colWidths=[44.5 * mm] * 4)
     kpi.setStyle(TableStyle([
         ("BOX", (0, 0), (-1, -1), 0.5, WHITE),
@@ -512,15 +538,15 @@ def build_snapshot_pdf(entries: list, year: int, merkle_root: str, workspace_ema
     ]))
     story.append(risk_tbl_hdr)
     risk_body = Table([[
-        Paragraph(f"<font color='#FF0000'>{risk_dist['HIGH']}</font>", ParagraphStyle("rh", fontName="Courier-Bold", fontSize=20, leading=24, alignment=1)),
-        Paragraph(f"<font color='#FFBF00'>{risk_dist['MODERATE']}</font>", ParagraphStyle("rm", fontName="Courier-Bold", fontSize=20, leading=24, alignment=1)),
-        Paragraph(f"<font color='#00FF41'>{risk_dist['LOW']}</font>", ParagraphStyle("rl", fontName="Courier-Bold", fontSize=20, leading=24, alignment=1)),
-        Paragraph(f"<font color='#808080'>{risk_dist['NONE']}</font>", ParagraphStyle("rn", fontName="Courier-Bold", fontSize=20, leading=24, alignment=1)),
+        Paragraph(f"<font color='#FF0000'>{risk_dist['HIGH']}</font>", ParagraphStyle("rh", fontName=MONO_BOLD, fontSize=20, leading=24, alignment=1)),
+        Paragraph(f"<font color='#FFBF00'>{risk_dist['MODERATE']}</font>", ParagraphStyle("rm", fontName=MONO_BOLD, fontSize=20, leading=24, alignment=1)),
+        Paragraph(f"<font color='#00FF41'>{risk_dist['LOW']}</font>", ParagraphStyle("rl", fontName=MONO_BOLD, fontSize=20, leading=24, alignment=1)),
+        Paragraph(f"<font color='#808080'>{risk_dist['NONE']}</font>", ParagraphStyle("rn", fontName=MONO_BOLD, fontSize=20, leading=24, alignment=1)),
     ], [
-        Paragraph("<font color='#808080'>HIGH</font>", ParagraphStyle("l1", fontName="Courier", fontSize=7, leading=10, alignment=1, letterSpacing=1.5)),
-        Paragraph("<font color='#808080'>MODERATE</font>", ParagraphStyle("l2", fontName="Courier", fontSize=7, leading=10, alignment=1, letterSpacing=1.5)),
-        Paragraph("<font color='#808080'>LOW</font>", ParagraphStyle("l3", fontName="Courier", fontSize=7, leading=10, alignment=1, letterSpacing=1.5)),
-        Paragraph("<font color='#808080'>NONE</font>", ParagraphStyle("l4", fontName="Courier", fontSize=7, leading=10, alignment=1, letterSpacing=1.5)),
+        Paragraph("<font color='#808080'>HIGH</font>", ParagraphStyle("l1", fontName=MONO, fontSize=7, leading=10, alignment=1, letterSpacing=1.5)),
+        Paragraph("<font color='#808080'>MODERATE</font>", ParagraphStyle("l2", fontName=MONO, fontSize=7, leading=10, alignment=1, letterSpacing=1.5)),
+        Paragraph("<font color='#808080'>LOW</font>", ParagraphStyle("l3", fontName=MONO, fontSize=7, leading=10, alignment=1, letterSpacing=1.5)),
+        Paragraph("<font color='#808080'>NONE</font>", ParagraphStyle("l4", fontName=MONO, fontSize=7, leading=10, alignment=1, letterSpacing=1.5)),
     ]], colWidths=[44.5 * mm] * 4)
     risk_body.setStyle(TableStyle([
         ("BOX", (0, 0), (-1, -1), 0.5, WHITE),
@@ -536,7 +562,7 @@ def build_snapshot_pdf(entries: list, year: int, merkle_root: str, workspace_ema
     # ---------- PAGE 2 · MASTER EVIDENCE TABLE ----------
     story.append(Paragraph("<font color='#808080'>// MASTER EVIDENCE TABLE</font>", label))
     story.append(Spacer(1, 3 * mm))
-    story.append(Paragraph(f"Ledger of Record · FY{year}", ParagraphStyle("h", fontName="Helvetica-Bold", fontSize=16, textColor=TEXT, leading=20)))
+    story.append(Paragraph(f"Ledger of Record · FY{year}", ParagraphStyle("h", fontName=SANS_BOLD, fontSize=16, textColor=TEXT, leading=20)))
     story.append(Spacer(1, 5 * mm))
 
     header = ["#", "AUDIT ID", "CLIENT", "DATE", "SCORE", "RISK", "COMPOSITE HASH (SHA-256)"]
@@ -562,8 +588,8 @@ def build_snapshot_pdf(entries: list, year: int, merkle_root: str, workspace_ema
         ("BACKGROUND", (0, 0), (-1, -1), BLACK),
         ("TEXTCOLOR", (0, 0), (-1, 0), SECONDARY),
         ("TEXTCOLOR", (0, 1), (-1, -1), TEXT),
-        ("FONTNAME", (0, 0), (-1, 0), "Courier-Bold"),
-        ("FONTNAME", (0, 1), (-1, -1), "Courier"),
+        ("FONTNAME", (0, 0), (-1, 0), MONO_BOLD),
+        ("FONTNAME", (0, 1), (-1, -1), MONO),
         ("FONTSIZE", (0, 0), (-1, -1), 7),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 5),
@@ -587,10 +613,10 @@ def build_snapshot_pdf(entries: list, year: int, merkle_root: str, workspace_ema
             f"were executed by AuditEngine v1.0 (anthropic:claude-sonnet-4-5-20250929) and their evidence chains are "
             f"provable via the SHA-256 fingerprints listed above. The Master Merkle Root below binds all audit hashes "
             f"into a single tamper-evident commitment.",
-            ParagraphStyle("cert", fontName="Helvetica", fontSize=9, textColor=TEXT, leading=13),
+            ParagraphStyle("cert", fontName=SANS, fontSize=9, textColor=TEXT, leading=13),
         )],
-        [Paragraph(f"<font color='#00FF41' name='Courier-Bold'>MASTER MERKLE ROOT: {merkle_root}</font>",
-            ParagraphStyle("mmr", fontName="Courier-Bold", fontSize=8, textColor=COMPLIANT, leading=12))],
+        [Paragraph(f"<font color='#00FF41' name='RobotoMono-Bold'>MASTER MERKLE ROOT: {merkle_root}</font>",
+            ParagraphStyle("mmr", fontName=MONO_BOLD, fontSize=8, textColor=COMPLIANT, leading=12))],
     ], colWidths=[178 * mm])
     cert.setStyle(TableStyle([
         ("BOX", (0, 0), (-1, -1), 0.5, WHITE),
@@ -607,7 +633,7 @@ def build_snapshot_pdf(entries: list, year: int, merkle_root: str, workspace_ema
         canvas.setFillColor(BLACK)
         canvas.rect(0, 0, doc.pagesize[0], doc.pagesize[1], fill=1, stroke=0)
         canvas.setFillColor(SECONDARY)
-        canvas.setFont("Courier", 6.5)
+        canvas.setFont(MONO, 6.5)
         canvas.drawString(16 * mm, 10 * mm, f"AUDITENGINE // STATUTORY SNAPSHOT // FY{year}")
         canvas.drawRightString(doc.pagesize[0] - 16 * mm, 10 * mm, f"PAGE {doc.page:02d}")
         canvas.setFillColor(colors.HexColor("#00FF41"))

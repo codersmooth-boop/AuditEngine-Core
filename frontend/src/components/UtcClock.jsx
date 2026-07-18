@@ -11,7 +11,7 @@ export default function UtcClock({ compact = false }) {
   const ss = String(now.getUTCSeconds()).padStart(2, "0");
   return (
     <div className="mono text-[10px] text-[#808080] tracking-widest" data-testid="utc-clock">
-      {compact ? `${hh}:${mm}:${ss}` : `UTC ${hh}:${mm}:${ss}`}
+      {compact ? `${hh}:${mm}:${ss}` : `UTC · ${hh}:${mm}:${ss}`}
     </div>
   );
 }
