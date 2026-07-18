@@ -217,8 +217,19 @@ async def create_session(request: Request, response: Response):
 
 
 @api_router.get("/auth/me")
-async def me(user: dict = Depends(get_current_user)):
+async def me(request: Request):
+    """Return 200 with `authenticated:false` for anon callers instead of 401 —
+    prevents the browser's native network-error log from firing on public
+    routes and login pages, which is critical for the Mirror-of-Certainty
+    console cleanliness. Callers should treat `authenticated:false` as anon."""
+    try:
+        user = await get_current_user(request)
+    except HTTPException as e:
+        if e.status_code == 401:
+            return {"authenticated": False}
+        raise
     return {
+        "authenticated": True,
         "user_id": user["user_id"],
         "email": user["email"],
         "name": user["name"],

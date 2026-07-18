@@ -9,10 +9,8 @@ export const api = axios.create({
 });
 
 export async function fetchMe() {
-  // Suppress axios throwing on 401 — expected during first paint before session is set.
-  // The AuthProvider still gets null via the empty/401 branch.
-  const r = await api.get("/auth/me", { validateStatus: (s) => s === 200 || s === 401 });
-  if (r.status !== 200) throw new Error("unauthenticated");
+  const r = await api.get("/auth/me");
+  if (!r.data || r.data.authenticated === false) throw new Error("unauthenticated");
   return r.data;
 }
 

@@ -114,15 +114,13 @@ class TestPatchADashboardGrid:
 # PATCH B · Silenced auth 401 noise
 # =====================================================================
 class TestPatchBFetchMeSilence:
-    def test_fetchme_uses_validate_status(self):
+    def test_fetchme_uses_envelope_contract(self):
+        """Iteration 9 update: contract changed from `validateStatus` shim to
+        server-side envelope `{authenticated:false}` (always 200)."""
         with open("/app/frontend/src/lib/api.js") as f:
             src = f.read()
-        assert "validateStatus" in src, "api.js must use validateStatus in fetchMe"
-        # Ensure /auth/me call has validateStatus attached
-        assert re.search(r"/auth/me[^)]*validateStatus", src, re.S), \
-            "fetchMe must pass validateStatus for /auth/me"
-        # Ensure it accepts 200 OR 401
-        assert "s === 200 || s === 401" in src or "s===200||s===401" in src.replace(" ", "")
+        assert "authenticated === false" in src or "authenticated===false" in src.replace(" ", ""), \
+            "fetchMe must inspect r.data.authenticated envelope"
 
 
 # =====================================================================
@@ -248,12 +246,16 @@ class TestPreviouslyLockedRegression:
     def test_auth_me_with_valid_session(self, auth):
         r = requests.get(f"{BASE_URL}/api/auth/me", headers=auth["headers"], timeout=10)
         assert r.status_code == 200
-        assert r.json()["user_id"] == auth["user_id"]
+        body = r.json()
+        assert body.get("authenticated") is True
+        assert body["user_id"] == auth["user_id"]
 
-    def test_auth_me_without_session_returns_401_silently(self):
-        """PATCH B underlying behaviour: /api/auth/me must still return 401 for anon."""
+    def test_auth_me_without_session_returns_200_envelope(self):
+        """Iteration 9 update: /api/auth/me now returns 200 with
+        {authenticated:false} for anon callers (was 401)."""
         r = requests.get(f"{BASE_URL}/api/auth/me", timeout=10)
-        assert r.status_code == 401
+        assert r.status_code == 200
+        assert r.json() == {"authenticated": False}
 
     def test_stripe_webhook_endpoint_exists(self):
         # Sending a bogus payload should return 400 (bad signature) — NOT 404

@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 9 retest — /api/auth/me envelope fix verified. Backend now returns 200 with {authenticated:false} for anon/invalid callers and {authenticated:true,...} for valid sessions. Chromium console noise (Failed to load resource: 401) is FULLY eliminated across /, /dashboard, /ledger, /audits/:id (anon + authed). All 23 backend tests (9 new iteration_9 + 14 refreshed iteration_8) pass. Protected routes still 401 for anon at API level; frontend still redirects anon to /.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_9_auth_me_envelope.py",
+    "/app/backend/tests/test_iteration_8_polish.py",
+    "/app/test_reports/pytest/iteration_9.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py me() correctly wraps get_current_user in try/except and re-raises non-401 HTTPExceptions — good defensive design.",
+    "api.js fetchMe throws on {authenticated:false} — clean signal for AuthProvider. No other callers depend on the old shape (grep confirmed).",
+    "Note: /api/auth/me contract change is a breaking API contract change; any external mobile/CLI client relying on 401-for-anon must be updated. Consider documenting in API changelog."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_8_polish.py (refreshed 3 stale assertions to match new envelope contract)",
+    "/app/backend/tests/test_iteration_9_auth_me_envelope.py (new — 9 tests covering envelope + regression)"
+  ],
+  "success_rate": {"backend": "100% (23/23)", "frontend": "100% (5/5 routes console-clean)"},
+  "test_credentials": "Seeded via mongosh: user_id=test-user-i9-1784380427224, session_token=test_session_i9_1784380427224 (7-day TTL). Fixtures teardown in test_iteration_9 module.",
+  "seed_data_creation": "One test user + session in mongo (module-scoped, auto-cleaned).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "The auth/me contract is now envelope-based: always 200 with `authenticated` boolean. When writing new tests or checking regressions, use `body['authenticated']` NOT `r.status_code == 401`. The old iteration_8 file had 3 stale assertions (validateStatus grep, 401 for anon, flat user dict) — all updated to the new contract. Playwright console noise verification pattern: page.on('console') + count entries matching 'Failed to load resource' — should be 0 on all public routes.",
+  "playwright_verification": {
+    "routes_tested": ["/", "/dashboard (anon→redirect)", "/ledger (anon→redirect)", "/audits/nonexistent (anon→redirect)", "/dashboard (authed)"],
+    "console_failed_to_load_resource": 0,
+    "console_auth_me_errors": 0,
+    "console_401_errors": 0,
+    "verdict": "CONSOLE NOISE FULLY ELIMINATED"
+  }
+}
