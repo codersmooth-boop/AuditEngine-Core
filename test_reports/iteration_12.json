@@ -1,0 +1,47 @@
+{
+  "summary": "Iteration 12 · Rotated Anthropic API key verification. PREVIEW: ACTIVE — heartbeat returns 200 with api_connection.route='anthropic-direct', status='ACTIVE', ok=true, model='claude-sonnet-4-5-20250929', body='OK', input_tokens=11, output_tokens=4, no 'detail' 401 error. E2E audit ran end-to-end: created audit, uploaded file, reached COMPLETE, and stream_logs contains the canonical provenance line matching `anthropic-direct · model=claude-sonnet-4-5-20250929 · in=<N> · out=<N>` tagged OK. .env ANTHROPIC_API_KEY line begins with sk-ant-api03-XZtCjZ9tqJudbW2ys, no surrounding quotes, length 126. PRODUCTION: STALE — both https://auditengine.net/api/system/heartbeat and https://audit-engine-38.emergent.host/api/system/heartbeat time out after 20s (TLS handshake ok, no HTTP response) — user must redeploy via Emergent Deploy button. Regression suite (18/18 tests) passes on preview after a minor test-harness fix (sys.path insertion for in-process llm_service unit tests).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "production_probe": {
+    "https://auditengine.net/api/system/heartbeat": "HTTP 000 — 20s timeout, no response body (TLS handshake completed, upstream unresponsive)",
+    "https://audit-engine-38.emergent.host/api/system/heartbeat": "HTTP 000 — 20s timeout, no response body (TLS handshake completed, upstream unresponsive)",
+    "verdict": "PRODUCTION STALE — user must redeploy. Read-only probe per Sovereignty Mode; no remediation attempted."
+  },
+  "preview_probe": {
+    "https://audit-engine-38.preview.emergentagent.com/api/system/heartbeat": "HTTP 200 · api_connection={route:'anthropic-direct', status:'ACTIVE', ok:true, model:'claude-sonnet-4-5-20250929', body:'OK', input_tokens:11, output_tokens:4}",
+    "verdict": "PREVIEW ACTIVE"
+  },
+  "env_check": {
+    "ANTHROPIC_API_KEY_prefix": "sk-ant-api03-XZtCjZ9tq (matches expected sk-ant-api03-XZtCjZ9tqJudbW2ys)",
+    "quotes": "none",
+    "length": 126
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_10_anthropic_direct.py",
+    "/app/test_reports/pytest/iteration_12.xml"
+  ],
+  "action_items": [
+    "USER (not main agent): Redeploy production via Emergent Deploy button — both auditengine.net and audit-engine-38.emergent.host currently unresponsive (20s timeout). Once redeployed, ensure production runtime has the same rotated ANTHROPIC_API_KEY as preview so /api/system/heartbeat returns route=anthropic-direct, status=ACTIVE.",
+    "Main agent: nothing further needed — preview fix is verified end-to-end."
+  ],
+  "critical_code_review_comments": [
+    "Test file test_iteration_10_anthropic_direct.py imports llm_service without pytest rootdir including /app/backend — fixed with sys.path.insert. Consider adding conftest.py at /app/backend/tests/ that inserts /app/backend on sys.path so future in-process unit tests don't hit ModuleNotFoundError."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_10_anthropic_direct.py (added sys.path.insert(0, '/app/backend') so TestHeartbeatFallbackLogic can import llm_service in-process; no product code changed)"
+  ],
+  "success_rate": {"backend": "100% (18/18)", "frontend": "n/a (backend + integration scope this iteration)"},
+  "test_credentials": "n/a — seeded ephemeral user per test run (i10-<ts>@auditengine.test)",
+  "seed_data_creation": "1 ephemeral user + session + 1 audit, cleaned up in fixture teardown (db.users/db.sessions/db.audits.delete_many by user_id)",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Preview backend is fully green on the rotated Anthropic key. Do NOT re-run TestEndToEndAuditDirectRoute repeatedly — each pass burns real Anthropic tokens (~1024 in / ~4000 out) on the user's account. Production is user-owned; do not attempt to write to it. The 2 previously-failing fallback tests (test_no_anthropic_key_falls_back_to_emergent, test_no_keys_at_all_returns_offline) now pass after sys.path fix in test file header.",
+  "rca of the issue": "User rotated their Anthropic API key externally. Preview backend still had the old key in /app/backend/.env and the anthropic SDK was returning 401 authentication_error on every /messages call, which the heartbeat surfaced as api_connection.status != ACTIVE with a 'detail' field carrying the 401. Main agent replaced ANTHROPIC_API_KEY in /app/backend/.env with the new rotated key (validated via direct anthropic.Anthropic() heartbeat before commit) and restarted supervisor backend. Because llm_service.py calls load_dotenv(override=True) at module import, the fresh key was picked up. Verified: heartbeat now returns route='anthropic-direct', status='ACTIVE', body='OK', with real (11 in / 4 out) token accounting, and a full E2E audit completes with the canonical `anthropic-direct · model=claude-sonnet-4-5-20250929 · in=<N> · out=<N>` provenance line in stream_logs. Production (auditengine.net + audit-engine-38.emergent.host) does not respond (upstream timeout) — that is a stale/undeployed runtime the user must redeploy; nothing to fix on the main-agent side."
+}

@@ -25,6 +25,9 @@ import pytest
 import requests
 from pymongo import MongoClient
 
+# Ensure /app/backend importable for llm_service in-process unit tests
+sys.path.insert(0, "/app/backend")
+
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 if not BASE_URL:
     with open("/app/frontend/.env") as f:
