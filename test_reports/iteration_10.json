@@ -1,0 +1,42 @@
+{
+  "summary": "Backend-only verification of BYOK Anthropic direct integration + heartbeat endpoint. 15/16 iteration_10 tests pass. Regression suites (iteration_8, iteration_9, zero_gap_closure) — 38/38 pass. Live /api/system/heartbeat returns 200 with anthropic-direct route, real token counters (in=11 out=4), body='OK', model=claude-sonnet-4-5-20250929, all five subsystems (api_connection, extraction_logic, legal_mapping, merkle_root, pdf_export) reporting as expected. Fallback route selection is logically correct (emergent-universal / offline) verified via re-imported module with patched env. The single failing assertion — `stream_logs` must contain the 'claude direct · in=… out=…' provenance line — is a real P0 signal gap: the log line is emitted via Python `logger.info()` (visible in /var/log/supervisor/backend.*.log as `auditengine - INFO - claude direct · in=1024 out=4163`) but is NOT propagated into the per-audit `stream_logs` array that the review explicitly required as institutional-grade proof-of-intent. The audit itself completes correctly via the direct route (real Claude output — compliance_score=42, sector-specific findings — is materially different from the deterministic fallback which returns score=54).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/audits/{id}/upload → _run_processing()",
+        "issue": "The 'claude direct · in=X out=Y' provenance line is emitted via `logger.info` in llm_service.py:152 but never propagated into audit.stream_logs. The reviewer flagged this as a P0 leak-of-intent risk: without this line in stream_logs, an operator cannot distinguish (from the audit trail alone) whether a completed audit used the user's own Anthropic key or silently fell back to Emergent Universal. Fix: `analyze_documents()` should return a `(result, provenance_meta)` tuple (route, model, input_tokens, output_tokens), and `_run_processing` in server.py should `_emit_log(audit_id, f\"claude direct · in={in} out={out}\", \"OK\")` right before COMPLETE.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "/app/backend/.env",
+        "issue": "ANTHROPIC_API_KEY value is wrapped in double quotes (dotenv strips them so runtime works fine, but this is non-standard for the codebase — other keys in the file are unquoted)."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_10_anthropic_direct.py",
+    "/app/test_reports/pytest/iteration_10.xml"
+  ],
+  "action_items": [
+    "P0: Propagate 'claude direct · in=… out=…' (or 'emergent-universal · …' on fallback) into audit.stream_logs so audit trail proves which route was used. Suggested implementation: refactor `analyze_documents()` to return provenance metadata; have `_run_processing` in server.py emit it via `_emit_log`.",
+    "P2: Unquote ANTHROPIC_API_KEY in /app/backend/.env for consistency with the other keys in that file."
+  ],
+  "critical_code_review_comments": [
+    "llm_service.py:152 uses `logger.info` for the sole provenance signal — a stdout log line that will not survive log rotation and cannot be attested to by the audit-log endpoint. For a compliance-grade product this line MUST live in the durable per-audit record (stream_logs collection field), not only in supervisor logs.",
+    "server.py:869 `from pdf_service import MONO, SANS` sits inside the request handler and is safe, but consider moving to module-top imports to avoid a per-request import overhead on the public heartbeat.",
+    "Heartbeat is a *public* endpoint and issues a real Anthropic call on every hit — this is billed to the user's key. Consider a 30-60 second in-process cache to prevent scraping/DoS-by-monitoring."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_10_anthropic_direct.py"
+  ],
+  "success_rate": {"backend": "94% (15/16 iteration_10 + 38/38 regression)", "frontend": "N/A (skipped per request)"},
+  "test_credentials": "Ephemeral test session seeded per fixture (user_id=test-user-i10-<ts>, session_token=test_session_i10_<ts>). Cleaned up in fixture teardown.",
+  "seed_data_creation": "One test user + user_session inserted into MongoDB, deleted at fixture teardown. One TEST_I10_DIRECT audit created and left in DB — cleaned by fixture. Real Anthropic call consumed ~1024 in / ~4163 out tokens for the E2E audit + 11 in / 4 out for the heartbeat call.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "After main agent fixes the stream_logs provenance line, re-run: `pytest /app/backend/tests/test_iteration_10_anthropic_direct.py -v`. The specific failing test is `TestEndToEndAuditDirectRoute::test_audit_completes_via_claude_direct`. That test will pass once _run_processing emits an `_emit_log(audit_id, 'claude direct · in=… out=…', 'OK')` before COMPLETE. Also worth adding an equivalent 'emergent-universal · …' emission for the fallback branch. Backend logs at /var/log/supervisor/backend.*.log currently contain the line 'auditengine - INFO - claude direct · in=1024 out=4163' — this proves the direct route works, just isn't surfaced.",
+  "rca of the issue": "Root cause: `llm_service.analyze_documents()` writes the provenance line via `logger.info(...)` (Python stdlib logging → supervisor stdout), but the audit's `stream_logs` array is populated only by `_emit_log()` calls in server.py:_run_processing(). The two channels are disjoint. Reproduction: 1) POST /api/audits → get audit_id  2) POST /api/audits/{id}/upload with any text file  3) Poll GET /api/audits/{id} until status=COMPLETE  4) Inspect `stream_logs`: no 'claude direct' line. Meanwhile `grep 'claude direct' /var/log/supervisor/backend.*.log` shows the line was emitted. Mitigation: return provenance from analyze_documents and emit via _emit_log before the final COMPLETE update in _run_processing (server.py ~line 367)."
+}
