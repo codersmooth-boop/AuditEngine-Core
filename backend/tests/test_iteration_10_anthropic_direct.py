@@ -191,14 +191,42 @@ class TestEndToEndAuditDirectRoute:
         assert final is not None, "audit did not terminate within 180s"
         assert final["status"] == "COMPLETE", f"status={final['status']} logs={final.get('stream_logs')}"
 
-        # PROOF · stream_logs must include `claude direct` line
+        # PROOF · stream_logs must include canonical anthropic-direct provenance line
         logs = final.get("stream_logs", []) or []
-        combined = " || ".join((l.get("text") or "") for l in logs).lower()
-        assert "claude direct" in combined, \
-            f"expected 'claude direct · in=… out=…' log line proving anthropic-direct path was used. Got: {combined[:800]}"
-        # And must NOT indicate the emergent fallback was used silently
-        # (production log line is only emitted on the direct path)
-        assert "emergent fallback" not in combined
+        texts = [(l.get("text") or "") for l in logs]
+        combined = " || ".join(texts)
+        prov_idx = None
+        for i, t in enumerate(texts):
+            if t.startswith("anthropic-direct · model=claude-sonnet-4-5") and " · in=" in t and " · out=" in t:
+                prov_idx = i
+                break
+        assert prov_idx is not None, \
+            f"expected 'anthropic-direct · model=claude-sonnet-4-5-… · in=… out=…' provenance in stream_logs. Got ({len(texts)} lines): {combined}"
+
+        # Provenance must sit between STEP-3 findings emissions and STEP-4 risk-map block.
+        # "Logic engine returned N findings" caps STEP-3; "Quantifying value-at-stake" starts STEP-4.
+        logic_done_idx = next((i for i, t in enumerate(texts) if t.startswith("Logic engine returned")), None)
+        risk_map_idx = next((i for i, t in enumerate(texts) if t.startswith("Quantifying value-at-stake")), None)
+        assert logic_done_idx is not None and risk_map_idx is not None, \
+            "missing STEP-3 sentinel or STEP-4 sentinel in stream_logs"
+        assert logic_done_idx < prov_idx < risk_map_idx, (
+            f"provenance line must sit AFTER STEP-3 findings (idx={logic_done_idx}) "
+            f"and BEFORE STEP-4 risk-map (idx={risk_map_idx}); got prov_idx={prov_idx}"
+        )
+
+        # Provenance tag must be OK for direct route
+        assert logs[prov_idx].get("tag") == "OK", f"expected tag=OK on direct-route provenance, got {logs[prov_idx].get('tag')}"
+
+        # .log export must include the provenance line verbatim
+        log_dl = requests.get(f"{BASE_URL}/api/audits/{audit_id}/audit-log",
+                              headers=auth["headers"], timeout=15)
+        assert log_dl.status_code == 200, log_dl.text
+        assert texts[prov_idx] in log_dl.text, \
+            f"provenance line missing from .log export. Line: {texts[prov_idx]!r}"
+
+        # Must NOT have silently fallen back
+        assert "emergent-universal" not in combined
+        assert "offline-fallback" not in combined
 
 
 # =====================================================================
@@ -260,6 +288,81 @@ class TestHeartbeatFallbackLogic:
                 hb = asyncio.run(llm_service.heartbeat())
                 assert hb["route"] == "offline"
                 assert hb["ok"] is False
+        finally:
+            _dotenv.load_dotenv = orig
+            for k in ("llm_service",):
+                if k in sys.modules:
+                    del sys.modules[k]
+
+
+# =====================================================================
+# 4b. analyze_documents provenance branches · unit tests
+# =====================================================================
+class TestAnalyzeDocumentsProvenance:
+    """Verify analyze_documents() attaches a _provenance dict with the correct
+    route on each of the three branches (direct, emergent, offline)."""
+
+    def _reimport(self):
+        for k in ("llm_service",):
+            if k in sys.modules:
+                del sys.modules[k]
+        sys.path.insert(0, "/app/backend")
+        import llm_service  # noqa
+        return llm_service
+
+    def test_emergent_universal_branch(self):
+        import dotenv as _dotenv
+        orig = _dotenv.load_dotenv
+        _dotenv.load_dotenv = lambda *a, **kw: True
+        try:
+            with patch.dict(os.environ,
+                            {"ANTHROPIC_API_KEY": "", "EMERGENT_LLM_KEY": "sk-fake-emergent-key"},
+                            clear=False):
+                svc = self._reimport()
+                assert svc.ANTHROPIC_API_KEY in (None, "")
+                assert svc.EMERGENT_LLM_KEY == "sk-fake-emergent-key"
+
+                class _FakeChat:
+                    def __init__(self, *a, **kw): pass
+                    def with_model(self, *a, **kw): return self
+                    async def send_message(self, msg):
+                        return (
+                            '{"compliance_score": 61, "value_at_stake_eur": 100.0, '
+                            '"greenwashing_risk": "MODERATE", '
+                            '"executive_summary": "x", "findings": [], "roadmap": []}'
+                        )
+                with patch.object(svc, "LlmChat", _FakeChat):
+                    result = asyncio.run(svc.analyze_documents(
+                        [{"filename": "x.txt", "text": "hello"}],
+                        "TEST_CLIENT", "Manufacture", 2024,
+                    ))
+                assert "_provenance" in result
+                assert result["_provenance"]["route"] == "emergent-universal"
+                assert result["_provenance"]["model"] == svc.CLAUDE_MODEL
+        finally:
+            _dotenv.load_dotenv = orig
+            for k in ("llm_service",):
+                if k in sys.modules:
+                    del sys.modules[k]
+
+    def test_offline_fallback_branch(self):
+        import dotenv as _dotenv
+        orig = _dotenv.load_dotenv
+        _dotenv.load_dotenv = lambda *a, **kw: True
+        try:
+            with patch.dict(os.environ,
+                            {"ANTHROPIC_API_KEY": "", "EMERGENT_LLM_KEY": ""},
+                            clear=False):
+                svc = self._reimport()
+                result = asyncio.run(svc.analyze_documents(
+                    [{"filename": "x.txt", "text": "hello"}],
+                    "TEST_CLIENT", "Manufacture", 2024,
+                ))
+                # No _provenance is attached on the pre-LLM offline short-circuit
+                # (analyze_documents returns _fallback_result directly). Reviewer expects
+                # _provenance['route'] == 'offline-fallback' — assert strictly.
+                assert "_provenance" in result, "offline branch missing _provenance stamp"
+                assert result["_provenance"]["route"] == "offline-fallback"
         finally:
             _dotenv.load_dotenv = orig
             for k in ("llm_service",):

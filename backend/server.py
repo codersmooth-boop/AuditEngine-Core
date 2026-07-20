@@ -341,11 +341,23 @@ async def _run_processing(audit_id: str, extracted_texts: List[dict], client_nam
         await _emit_log(audit_id, "Probing EU Taxonomy Art. 8 substantial-contribution + DNSH", "OK", 0.2)
         await _emit_log(audit_id, "Materiality assessment · double materiality axis", "OK", 0.2)
         result = await analyze_documents(extracted_texts, client_name, nace_name, reporting_year)
+        # PROVENANCE — durable per-audit stamp of which LLM route was actually used.
+        # Positioned AFTER findings emission and BEFORE STEP-4 risk-map, anchored to
+        # the logic-engine completion sentinel in the .log export.
+        prov = (result.pop("_provenance", None) or {})
+        route = prov.get("route", "unknown")
+        prov_tag = "OK" if route == "anthropic-direct" else ("WARN" if route == "emergent-universal" else "FALLBACK")
+        if prov.get("input_tokens") is not None:
+            prov_line = f"{route} · model={prov.get('model')} · in={prov.get('input_tokens')} · out={prov.get('output_tokens')}"
+        else:
+            prov_line = f"{route} · model={prov.get('model')}" + (f" · {prov.get('error','')}" if prov.get("error") else "")
         # Publish findings as scripted matches
         for f in (result.get("findings") or [])[:14]:
             tag = {"CRITICAL": "BREACH", "MODERATE": "GAP", "COMPLIANT": "OK"}.get(f.get("severity"), "MATCH")
             await _emit_log(audit_id, f"{f.get('data_point','')} · {f.get('regulatory_ref','')} · {f.get('status','')}", tag, 0.15)
         await _emit_log(audit_id, f"Logic engine returned {len(result.get('findings',[]))} findings", "OK", 0.15)
+        # Emit provenance right after STEP-3 completion, before STEP-4 risk-map.
+        await _emit_log(audit_id, prov_line, prov_tag, 0.1)
 
         # STEP 4 · Risk Map
         await db.audits.update_one({"audit_id": audit_id}, {"$set": {"processing_step": 4}})

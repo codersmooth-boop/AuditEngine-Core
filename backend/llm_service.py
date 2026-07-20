@@ -119,7 +119,11 @@ def _fallback_result(client_name: str, nace_name: str, year: int) -> Dict[str, A
 
 async def analyze_documents(extracted: List[Dict[str, str]], client_name: str, nace_name: str, reporting_year: int) -> Dict[str, Any]:
     if not (ANTHROPIC_API_KEY or EMERGENT_LLM_KEY):
-        return _fallback_result(client_name, nace_name, reporting_year)
+        fb = _fallback_result(client_name, nace_name, reporting_year)
+        fb["_provenance"] = {"route": "offline-fallback", "model": None,
+                             "input_tokens": None, "output_tokens": None,
+                             "error": "no API key configured"}
+        return fb
 
     # Sanitize any pre-existing delimiter markers in the untrusted content.
     safe_docs = []
@@ -149,6 +153,12 @@ async def analyze_documents(extracted: List[Dict[str, str]], client_name: str, n
                 messages=[{"role": "user", "content": user_text}],
             )
             text = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
+            provenance = {
+                "route": "anthropic-direct",
+                "model": resp.model,
+                "input_tokens": resp.usage.input_tokens,
+                "output_tokens": resp.usage.output_tokens,
+            }
             logger.info(f"claude direct · in={resp.usage.input_tokens} out={resp.usage.output_tokens}")
         else:
             # Fallback — Emergent Universal Key.
@@ -159,6 +169,12 @@ async def analyze_documents(extracted: List[Dict[str, str]], client_name: str, n
             ).with_model("anthropic", CLAUDE_MODEL)
             response = await chat.send_message(UserMessage(text=user_text))
             text = response if isinstance(response, str) else str(response)
+            provenance = {
+                "route": "emergent-universal",
+                "model": CLAUDE_MODEL,
+                "input_tokens": None,
+                "output_tokens": None,
+            }
 
         data = _extract_json(text)
         # Basic normalization
@@ -172,10 +188,15 @@ async def analyze_documents(extracted: List[Dict[str, str]], client_name: str, n
             f.setdefault("id", f"F{i+1:03d}")
         for i, r in enumerate(data["roadmap"]):
             r.setdefault("id", f"R{i+1}")
+        data["_provenance"] = provenance
         return data
     except Exception as e:
         logger.exception(f"LLM analysis failed ({'direct' if ANTHROPIC_API_KEY else 'emergent'}): {e}")
-        return _fallback_result(client_name, nace_name, reporting_year)
+        fb = _fallback_result(client_name, nace_name, reporting_year)
+        fb["_provenance"] = {"route": "offline-fallback", "model": None,
+                             "input_tokens": None, "output_tokens": None,
+                             "error": str(e)[:200]}
+        return fb
 
 
 async def heartbeat() -> Dict[str, Any]:

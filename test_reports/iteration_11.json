@@ -1,0 +1,35 @@
+{
+  "summary": "Iteration 11 · P0 provenance-leak retest. All targeted contracts now hold. E2E audit (Anthropic direct route, real 1024-in / ~4000-out Claude call) completes and stream_logs contains the canonical `anthropic-direct · model=claude-sonnet-4-5-20250929 · in=1024 · out=<N>` line, tagged OK, positioned AFTER the STEP-3 findings emissions and BEFORE the STEP-4 risk-map block, and the same line is present verbatim in the GET /api/audits/{id}/audit-log export. Two small code fixes applied by testing agent: (1) added ` · ` separator before `out=` in server.py prov_line formatter to match reviewer's canonical string spec, (2) moved provenance _emit_log call to sit right after the 'Logic engine returned N findings' sentinel (previously it fired before the findings loop), (3) added _provenance stamp to the pre-LLM offline short-circuit in llm_service.analyze_documents so the reviewer-specified unit test asserts `_provenance['route']=='offline-fallback'` holds. Full regression: iteration_10 (18) + iteration_9 (11 incl. 1 skipped) + iteration_8 (17) + zero_gap_closure (11) + billing/regulator/stripe (54) = 110 passed, 1 skipped, 0 failed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/app/backend/tests/test_iteration_10_anthropic_direct.py::TestSystemHeartbeat", "issue": "Class-scoped fixture defined as instance method — PytestRemovedIn10Warning. Convert to @classmethod. Non-blocking."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_10_anthropic_direct.py",
+    "/app/test_reports/pytest/iteration_11.xml"
+  ],
+  "action_items": [
+    "None blocking. Optional polish: (a) migrate class-scoped `hb` fixture to @classmethod to silence PytestRemovedIn10Warning; (b) add a 30-60s TTL cache around /api/system/heartbeat since it bills the user's Anthropic key on every hit — trivially DoS-able on a public endpoint; (c) consider adding an EMERGENT_LLM_KEY branch integration test that hits the real emergentintegrations path (currently only mocked)."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 962 lines — over the 700-line threshold in the internal code-review checklist. Suggest splitting routing modules (audits, payments, regulator, public, auth) into thin routers.",
+    "_stream_publish() fires-and-forgets the mongo persist via asyncio.create_task without awaiting or gathering; on high-frequency emit bursts (e.g., 14 findings + 5 roadmap items back-to-back), event-loop ordering can theoretically deliver mongo pushes out of insertion order. Not observed in this run but worth a documented ordering guarantee if the .log export is legally binding.",
+    "llm_service.analyze_documents previously silently discarded provenance on the no-keys short-circuit; fixed. Consider unit-testing every branch of _provenance shape as a schema (route, model, input_tokens, output_tokens, optional error).",
+    "The public /api/system/heartbeat endpoint issues a real billed Anthropic call on every unauthenticated hit — flagged in iteration_10 but still outstanding."
+  ],
+  "updated_files": [
+    "/app/backend/server.py (fixed prov_line separator; repositioned _emit_log call to sit between findings and risk-map)",
+    "/app/backend/llm_service.py (attach _provenance on no-keys offline short-circuit)",
+    "/app/backend/tests/test_iteration_10_anthropic_direct.py (updated E2E assertion to new canonical 'anthropic-direct · model=…' format; added ordering + .log-export checks; added TestAnalyzeDocumentsProvenance class with emergent-universal + offline-fallback branches)"
+  ],
+  "success_rate": {"backend": "100% (110 passed, 1 skipped, 0 failed across iteration_8/9/10/zero_gap_closure/billing/regulator/stripe)", "frontend": "N/A (backend-only per request)"},
+  "test_credentials": "Ephemeral per-fixture user (test-user-i10-<ts> / test_session_i10_<ts>) inserted + cleaned. ANTHROPIC_API_KEY read from /app/backend/.env (unquoted, sk-ant- prefix, not printed).",
+  "seed_data_creation": "One TEST_I10_DIRECT audit + user + session created per test-class run and torn down by fixture. Real Anthropic call consumed ~1024 in / ~4000 out tokens for the E2E audit + 11 in / 4 out for the heartbeat call (single call per suite run).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "iteration_11 closes the P0 provenance-leak flagged in iteration_10. The .env now has ANTHROPIC_API_KEY unquoted (confirmed). Canonical stream_logs line is: `anthropic-direct · model=claude-sonnet-4-5-20250929 · in=<N> · out=<N>` (tag=OK). For the emergent-universal fallback the line is `emergent-universal · model=claude-sonnet-4-5-20250929` (input/output tokens are None because emergentintegrations does not expose usage counters) with tag=WARN. Offline branch emits `offline-fallback · model=None · <error>` with tag=FALLBACK. If future iterations touch _run_processing, the required ordering is: Materiality assessment → findings loop → 'Logic engine returned N findings' → PROVENANCE line → STEP-4 'Quantifying value-at-stake' block.",
+  "rca of the issue": "iteration_10 fix by main agent was 90% correct but missed two contract points: (a) the ` · out=` separator was ` ` (space) not ` · ` — cosmetic but breaks reviewer's exact string match; (b) the emit was placed BEFORE the findings loop instead of AFTER — reviewer explicitly required it anchored to the logic-engine COMPLETION sentinel (`Logic engine returned N findings`) so that in the .log export the operator sees findings-then-provenance-then-riskmap. Both fixed. Also, the no-keys short-circuit in llm_service.analyze_documents returned a raw fallback dict without a _provenance key; server.py would then emit `unknown · model=None` — technically not offline-fallback. Fixed by stamping _provenance on the short-circuit path."
+}
